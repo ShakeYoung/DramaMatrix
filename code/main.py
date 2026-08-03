@@ -1,7 +1,8 @@
 import os
 from dotenv import load_dotenv
-from src.db import db_save_project_state
+from src.db import db_get_project_state_snapshot, db_save_project_state
 from src.graph import build_drama_matrix_graph
+from src.project_state import new_project_state, restore_project_state
 from src.text_model import has_text_model_credentials
 
 # 加载环境变量（文本模型和 Agnes 视频模型共用该配置文件）
@@ -16,19 +17,14 @@ def main():
         
     app = build_drama_matrix_graph()
     
-    # 初始化一个最初的系统全局 State，从 Agent 1 开始流转
-    initial_state_dict = {
-        "project_id": "Drama_20260307_001",
-        "meta_info": {
-            "source_title": "待定",
-            "genre_tags": [],
-        },
-        "market_feedback": None,
-        "source_material": {},
-        "master_script_outline": "",
-        "episodes": {},
-        "system_status": "starting"
-    }
+    project_id = os.getenv("DRAMAMATRIX_PROJECT_ID", "Drama_20260307_001")
+    resume_enabled = os.getenv("DRAMAMATRIX_RESUME", "1").strip().lower() not in {"0", "false", "no"}
+    snapshot = db_get_project_state_snapshot(project_id) if resume_enabled else None
+    if snapshot:
+        initial_state_dict = restore_project_state(snapshot)
+        print(f"==========↩️ 恢复项目 {project_id}（上次阶段: {snapshot['system_status']}）==========")
+    else:
+        initial_state_dict = new_project_state(project_id)
 
     # 使用 LangGraph 的 stream 接口或者 invoke 接口运行
     print("==========🚀 开始 DramaMatrix [Agnes 视频生产链路] 🚀==========")

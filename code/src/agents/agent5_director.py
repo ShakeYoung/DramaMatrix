@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 from src.agnes_video import (
     AgnesConfigurationError,
     AgnesTaskFailed,
@@ -12,6 +14,7 @@ from src.agnes_video import (
     safe_component,
 )
 from src.state import DramaState, EpisodeState, FeedbackLog, GeneratedVideoAsset, ShotStoryboard
+from src.db import db_save_project_state
 
 
 NEGATIVE_PROMPT = (
@@ -47,8 +50,18 @@ def _reject_episode(ep_key: str, ep_state: EpisodeState, message: str) -> None:
     print(f"❌ {ep_key} 的 Agnes 渲染任务失败，已将明确错误反馈给 Agent 4。")
 
 
+def _checkpoint(state: DramaState, ep_key: str, ep_state: EpisodeState) -> None:
+    """Durably record a submitted task before any further network request."""
+    state["episodes"][ep_key] = ep_state
+    try:
+        db_save_project_state(state)
+    except Exception as exc:
+        # Rendering may still continue, but the operator must know that resume safety was lost.
+        print(f"⚠️ {ep_key} 的 Agnes 任务状态快照保存失败：{exc}")
+
+
 def _render_episode(
-    project_id: str,
+    state: DramaState,
     ep_key: str,
     ep_state: EpisodeState,
     client: AgnesVideoClient,
@@ -67,59 +80,87 @@ def _render_episode(
         print(f"❌ {ep_key} 没有可提交给 Agnes 的分镜。")
         return
 
+    is_resume = ep_state.status in {"rendering", "render_pending"}
     ep_state.status = "rendering"
-    ep_state.video_assets = []
-    shot_directory = episode_output_dir(project_id, ep_key) / "shots"
-    print(f"-> {ep_key}: 逐镜提交 {len(shots)} 个 Agnes 视频任务。")
+    if not is_resume:
+        ep_state.video_assets = []
+    assets_by_shot = {asset.shot_id: asset for asset in ep_state.video_assets}
+    shot_directory = episode_output_dir(state["project_id"], ep_key) / "shots"
+    action = "恢复轮询/下载" if is_resume else "逐镜提交"
+    print(f"-> {ep_key}: {action} {len(shots)} 个 Agnes 视频任务。")
 
     for index, shot in enumerate(shots, start=1):
         prompt = build_agnes_prompt(shot)
+        asset = assets_by_shot.get(shot.shot_id)
+        if asset and asset.local_path and Path(asset.local_path).is_file():
+            asset.status = "completed"
+            continue
         try:
-            created = client.create_video(
-                prompt=prompt,
-                negative_prompt=NEGATIVE_PROMPT,
-                duration=shot.duration,
-                seed=20260801 + index,
-            )
-            created_video_id = created.get("video_id")
-            video_id = str(created_video_id or created.get("task_id") or created["id"])
-            task_id = str(created.get("task_id") or created.get("id") or video_id)
-            print(f"   [{ep_key}/{shot.shot_id}] 已创建 Agnes 任务: {task_id}")
-            completed = client.wait_for_video(str(created_video_id) if created_video_id else None, task_id)
+            if asset and (asset.video_id or asset.task_id):
+                video_id = asset.video_id
+                task_id = asset.task_id or asset.video_id
+                print(f"   [{ep_key}/{shot.shot_id}] 恢复 Agnes 任务: {task_id}")
+            else:
+                created = client.create_video(
+                    prompt=prompt,
+                    negative_prompt=NEGATIVE_PROMPT,
+                    duration=shot.duration,
+                    seed=20260801 + index,
+                )
+                created_video_id = created.get("video_id")
+                video_id = str(created_video_id or created.get("task_id") or created["id"])
+                task_id = str(created.get("task_id") or created.get("id") or video_id)
+                asset = GeneratedVideoAsset(
+                    shot_id=shot.shot_id,
+                    video_id=video_id,
+                    task_id=task_id,
+                    status="submitted",
+                    prompt=prompt,
+                )
+                ep_state.video_assets.append(asset)
+                assets_by_shot[shot.shot_id] = asset
+                _checkpoint(state, ep_key, ep_state)
+                print(f"   [{ep_key}/{shot.shot_id}] 已创建 Agnes 任务并保存: {task_id}")
+
+            completed = client.wait_for_video(video_id, task_id)
             remote_url = (completed.get("metadata") or {}).get("url")
             if not remote_url:
                 raise AgnesVideoError("Agnes 任务已完成但响应未包含 metadata.url。")
+            asset.status = "downloading"
+            asset.remote_url = str(remote_url)
+            _checkpoint(state, ep_key, ep_state)
             local_path = client.download_video(
                 str(remote_url),
                 shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}.mp4",
             )
-            ep_state.video_assets.append(
-                GeneratedVideoAsset(
-                    shot_id=shot.shot_id,
-                    video_id=video_id,
-                    task_id=task_id,
-                    status="completed",
-                    prompt=prompt,
-                    remote_url=str(remote_url),
-                    local_path=str(local_path),
-                )
-            )
+            asset.status = "completed"
+            asset.local_path = str(local_path)
+            _checkpoint(state, ep_key, ep_state)
         except AgnesTaskFailed as exc:
             _reject_episode(ep_key, ep_state, f"镜头 {shot.shot_id} 的 Agnes 任务失败：{exc}")
+            _checkpoint(state, ep_key, ep_state)
             return
         except AgnesVideoError as exc:
-            ep_state.status = "render_failed"
-            print(f"❌ {ep_key} 的 Agnes 调用或下载失败：{exc}")
+            # If an ID was persisted, this is recoverable: later runs poll the
+            # same remote task instead of submitting a charged duplicate task.
+            ep_state.status = "render_pending" if asset and (asset.video_id or asset.task_id) else "render_failed"
+            _checkpoint(state, ep_key, ep_state)
+            print(f"❌ {ep_key} 的 Agnes 调用或下载失败：{exc}；已保留任务，重跑将继续恢复。")
             return
 
     ep_state.status = "video_generated"
+    _checkpoint(state, ep_key, ep_state)
     print(f"✅ {ep_key} 的 {len(ep_state.video_assets)} 个分镜视频已下载完成。")
 
 
 def process_agent5_director(state: DramaState) -> DramaState:
     """Render every storyboard-ready episode through the real Agnes asynchronous API."""
     print("--- [Agent 5: Agnes Video Director] ---")
-    targets = [(key, ep) for key, ep in state["episodes"].items() if ep.status == "storyboard_done"]
+    targets = [
+        (key, ep)
+        for key, ep in state["episodes"].items()
+        if ep.status in {"storyboard_done", "rendering", "render_pending"}
+    ]
     if not targets:
         print("没有等待 Agnes 渲染的剧集。")
         return state
@@ -136,12 +177,15 @@ def process_agent5_director(state: DramaState) -> DramaState:
         return state
 
     for ep_key, ep_state in targets:
-        _render_episode(state["project_id"], ep_key, ep_state, client, settings)
+        _render_episode(state, ep_key, ep_state, client, settings)
         state["episodes"][ep_key] = ep_state
+        if ep_state.status == "render_pending":
+            # Do not submit later episodes while the proxy is unstable.
+            break
 
     if any(ep.status == "director_rejected" for _, ep in targets):
         state["system_status"] = "blocked_on_storyboard_revision"
-    elif any(ep.status == "render_failed" for _, ep in targets):
+    elif any(ep.status in {"render_failed", "render_pending"} for _, ep in targets):
         state["system_status"] = "blocked_on_agnes_render"
     else:
         state["system_status"] = "video_assets_downloaded"

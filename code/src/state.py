@@ -59,6 +59,7 @@ class EpisodeState(BaseModel):
         "script_done",
         "storyboard_done",
         "rendering",
+        "render_pending",
         "director_rejected",
         "render_failed",
         "video_generated",

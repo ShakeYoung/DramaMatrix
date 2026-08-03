@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 from src.agents.agent5_director import process_agent5_director
 from src.agents.agent6_editor import process_agent6_editor
 from src.agents.agent7_growth import process_agent7_growth
-from src.agnes_video import AgnesVideoSettings
+from src.agnes_video import AgnesVideoError, AgnesVideoSettings
 from src.state import EpisodeScriptData, EpisodeState, ShotStoryboard
 
 
@@ -50,7 +50,7 @@ class MediaAgentTests(unittest.TestCase):
                 return destination
 
             client.download_video.side_effect = fake_download
-            with patch("src.agents.agent5_director.AgnesVideoSettings.from_environment", return_value=settings), patch("src.agents.agent5_director.AgnesVideoClient", return_value=client):
+            with patch("src.agents.agent5_director.AgnesVideoSettings.from_environment", return_value=settings), patch("src.agents.agent5_director.AgnesVideoClient", return_value=client), patch("src.agents.agent5_director.db_save_project_state"):
                 process_agent5_director(state)
 
             episode = state["episodes"]["ep_01"]
@@ -77,6 +77,52 @@ class MediaAgentTests(unittest.TestCase):
             self.assertEqual(episode.status, "growth_ready")
             self.assertEqual(len(episode.growth_assets), 2)
             self.assertTrue(all(Path(asset.path).is_file() for asset in episode.growth_assets))
+
+    def test_submitted_task_is_checkpointed_and_resumed_without_recreation(self):
+        state = make_state()
+        settings = AgnesVideoSettings(api_key="test-key", max_shots_per_episode=1)
+        checkpoints = []
+
+        def record_checkpoint(saved_state):
+            assets = saved_state["episodes"]["ep_01"].video_assets
+            if assets:
+                checkpoints.append(assets[0].task_id)
+
+        first_client = MagicMock()
+        first_client.create_video.return_value = {"video_id": "video_1", "task_id": "task_1"}
+        first_client.wait_for_video.side_effect = AgnesVideoError("transient EOF")
+        with patch("src.agents.agent5_director.AgnesVideoSettings.from_environment", return_value=settings), patch(
+            "src.agents.agent5_director.AgnesVideoClient", return_value=first_client
+        ), patch("src.agents.agent5_director.db_save_project_state", side_effect=record_checkpoint):
+            process_agent5_director(state)
+
+        episode = state["episodes"]["ep_01"]
+        self.assertEqual(episode.status, "render_pending")
+        self.assertEqual(episode.video_assets[0].task_id, "task_1")
+        self.assertIn("task_1", checkpoints)
+
+        resumed_client = MagicMock()
+        resumed_client.wait_for_video.return_value = {
+            "status": "completed",
+            "metadata": {"url": "https://example.test/video.mp4"},
+        }
+
+        def fake_download(remote_url, destination):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"video")
+            return destination
+
+        resumed_client.download_video.side_effect = fake_download
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            "os.environ", {"DRAMAMATRIX_OUTPUT_DIR": directory}, clear=False
+        ), patch("src.agents.agent5_director.AgnesVideoSettings.from_environment", return_value=settings), patch(
+            "src.agents.agent5_director.AgnesVideoClient", return_value=resumed_client
+        ), patch("src.agents.agent5_director.db_save_project_state"):
+            process_agent5_director(state)
+
+        self.assertFalse(resumed_client.create_video.called)
+        resumed_client.wait_for_video.assert_called_once_with("video_1", "task_1")
+        self.assertEqual(episode.status, "video_generated")
 
 
 if __name__ == "__main__":
