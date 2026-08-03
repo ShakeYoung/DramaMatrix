@@ -3,12 +3,14 @@ from dotenv import load_dotenv
 from src.db import db_get_project_state_snapshot, db_save_project_state
 from src.graph import build_drama_matrix_graph
 from src.project_state import new_project_state, restore_project_state
+from src.runtime_options import apply_runtime_options, parse_runtime_options
 from src.text_model import has_text_model_credentials
 
 # 加载环境变量（文本模型和 Agnes 视频模型共用该配置文件）
 load_dotenv()
 
-def main():
+def main(argv=None):
+    apply_runtime_options(parse_runtime_options(argv))
     if not os.getenv("AGNES_API_KEY"):
         print("⚠️ 未检测到 AGNES_API_KEY。请在 .env 中配置后再运行真实视频生产流程。")
         return

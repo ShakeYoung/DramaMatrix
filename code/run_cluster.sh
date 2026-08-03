@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-# Submit from the repository root with: mkdir -p logs && sbatch code/run_cluster.sh
+# Submit from the repository root with:
+# mkdir -p logs && sbatch code/run_cluster.sh --project-id Drama_20260307_001 --resume
 # Adjust commented Slurm directives for the target cluster before submission.
 #SBATCH --job-name=dramamatrix
 #SBATCH --output=logs/dramamatrix_%j.log
@@ -38,7 +39,7 @@ echo "Date: $(date)"
 echo "=========================================================="
 
 cd code
-python -u main.py
+python -u main.py "$@"
 
 echo "=========================================================="
 echo "Job completed at: $(date)"
