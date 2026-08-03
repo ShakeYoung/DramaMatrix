@@ -191,11 +191,26 @@ class AgnesVideoClient:
             result = self.get_video(video_id) if video_id else self.get_task(str(task_id))
             status = str(result.get("status", "")).lower()
             if status == "completed":
-                return result
+                # `/agnesapi` can report completion a little before it exposes
+                # `metadata.url`.  The task endpoint is then the authoritative
+                # fallback (and may already contain the finished asset URL).
+                if (result.get("metadata") or {}).get("url") or not task_id:
+                    return result
+                detail = self.get_task(str(task_id))
+                detail_status = str(detail.get("status", "")).lower()
+                if detail_status == "failed":
+                    error = detail.get("error") or "远端视频任务失败。"
+                    raise AgnesTaskFailed(str(error))
+                if detail_status == "completed" and (detail.get("metadata") or {}).get("url"):
+                    return detail
+                # The completion status and asset URL are eventually consistent;
+                # keep polling instead of failing this entire episode early.
+                time.sleep(self.settings.poll_interval_seconds)
+                continue
             if status == "failed":
                 error = result.get("error") or "远端视频任务失败。"
                 raise AgnesTaskFailed(str(error))
-            if status not in {"queued", "in_progress", ""}:
+            if status not in {"queued", "pending", "in_progress", "processing", "running", ""}:
                 raise AgnesVideoError(f"Agnes 返回未知任务状态: {status}")
             time.sleep(self.settings.poll_interval_seconds)
         raise AgnesVideoError(f"等待视频任务 {video_id or task_id} 超时。")

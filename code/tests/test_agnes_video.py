@@ -57,6 +57,26 @@ class AgnesVideoClientTests(unittest.TestCase):
             result = client.wait_for_video("video_123")
         self.assertEqual(result["metadata"]["url"], "https://example.test/video.mp4")
 
+    def test_wait_for_video_falls_back_to_task_detail_for_completed_asset_url(self):
+        client = AgnesVideoClient(self.settings)
+        with patch.object(client, "get_video", return_value={"status": "completed"}), patch.object(
+            client,
+            "get_task",
+            return_value={"status": "completed", "metadata": {"url": "https://example.test/video.mp4"}},
+        ):
+            result = client.wait_for_video("video_123", "task_123")
+        self.assertEqual(result["metadata"]["url"], "https://example.test/video.mp4")
+
+    def test_wait_for_video_accepts_pending_status(self):
+        client = AgnesVideoClient(self.settings)
+        responses = [
+            {"status": "pending"},
+            {"status": "completed", "metadata": {"url": "https://example.test/video.mp4"}},
+        ]
+        with patch.object(client, "get_video", side_effect=responses):
+            result = client.wait_for_video("video_123")
+        self.assertEqual(result["status"], "completed")
+
     def test_wait_for_video_raises_for_remote_failure(self):
         client = AgnesVideoClient(self.settings)
         with patch.object(client, "get_video", return_value={"status": "failed", "error": {"message": "bad prompt"}}):
