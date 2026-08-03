@@ -1,6 +1,8 @@
 import json
+import tempfile
 import unittest
 from unittest.mock import patch
+from urllib.error import URLError
 
 from src.agnes_video import (
     AgnesConfigurationError,
@@ -24,6 +26,24 @@ class FakeResponse:
 
     def read(self):
         return json.dumps(self.payload).encode("utf-8")
+
+
+class FakeBinaryResponse:
+    def __init__(self, payload):
+        self.payload = payload
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        return False
+
+    def read(self, size=-1):
+        if size == -1:
+            result, self.payload = self.payload, b""
+            return result
+        result, self.payload = self.payload[:size], self.payload[size:]
+        return result
 
 
 class AgnesVideoClientTests(unittest.TestCase):
@@ -76,6 +96,23 @@ class AgnesVideoClientTests(unittest.TestCase):
         with patch.object(client, "get_video", side_effect=responses):
             result = client.wait_for_video("video_123")
         self.assertEqual(result["status"], "completed")
+
+    def test_get_request_retries_network_eof(self):
+        client = AgnesVideoClient(self.settings)
+        with patch("src.agnes_video.urlopen", side_effect=[URLError("SSL EOF"), FakeResponse({"status": "queued"})]) as mocked_open:
+            result = client.get_task("task_123")
+        self.assertEqual(result["status"], "queued")
+        self.assertEqual(mocked_open.call_count, 2)
+
+    def test_download_retries_network_eof(self):
+        client = AgnesVideoClient(self.settings)
+        with tempfile.TemporaryDirectory() as directory, patch(
+            "src.agnes_video.urlopen",
+            side_effect=[URLError("SSL EOF"), FakeBinaryResponse(b"video-bytes")],
+        ) as mocked_open:
+            destination = client.download_video("https://example.test/video.mp4", __import__("pathlib").Path(directory) / "video.mp4")
+        self.assertEqual(mocked_open.call_count, 2)
+        self.assertEqual(destination.name, "video.mp4")
 
     def test_wait_for_video_raises_for_remote_failure(self):
         client = AgnesVideoClient(self.settings)

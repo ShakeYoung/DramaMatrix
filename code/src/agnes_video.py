@@ -11,9 +11,11 @@ import json
 import os
 import re
 import shutil
+import ssl
 import subprocess
 import time
 from dataclasses import dataclass
+from http.client import HTTPException
 from pathlib import Path
 from typing import Any, Mapping, Optional
 from urllib.error import HTTPError, URLError
@@ -56,6 +58,8 @@ class AgnesVideoSettings:
     max_poll_seconds: int = 900
     max_revisions: int = 2
     max_shots_per_episode: int = 0
+    get_retry_attempts: int = 3
+    retry_delay_seconds: float = 2.0
 
     @classmethod
     def from_environment(cls) -> "AgnesVideoSettings":
@@ -71,6 +75,8 @@ class AgnesVideoSettings:
             max_poll_seconds=_int_env("AGNES_MAX_POLL_SECONDS", 900),
             max_revisions=_int_env("AGNES_MAX_REVISIONS", 2),
             max_shots_per_episode=_int_env("AGNES_MAX_SHOTS_PER_EPISODE", 0),
+            get_retry_attempts=_int_env("AGNES_GET_RETRY_ATTEMPTS", 3),
+            retry_delay_seconds=_float_env("AGNES_RETRY_DELAY_SECONDS", 2.0),
         )
 
     def validate(self) -> None:
@@ -84,6 +90,8 @@ class AgnesVideoSettings:
             raise AgnesConfigurationError("AGNES_VIDEO_FRAME_RATE 必须在 1–60 之间。")
         if self.width <= 0 or self.height <= 0:
             raise AgnesConfigurationError("AGNES_VIDEO_WIDTH 和 AGNES_VIDEO_HEIGHT 必须为正整数。")
+        if self.get_retry_attempts < 0 or self.retry_delay_seconds < 0:
+            raise AgnesConfigurationError("Agnes 重试次数和重试间隔不能为负数。")
 
 
 def safe_component(value: str) -> str:
@@ -135,16 +143,29 @@ class AgnesVideoClient:
             headers["Content-Type"] = "application/json"
             data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
         request = Request(url, data=data, headers=headers, method=method)
-        try:
-            with urlopen(request, timeout=self.settings.request_timeout_seconds) as response:
-                raw = response.read().decode("utf-8")
-        except HTTPError as exc:
-            detail = exc.read().decode("utf-8", errors="replace")[:600]
-            raise AgnesVideoError(f"Agnes API HTTP {exc.code}: {detail}") from exc
-        except URLError as exc:
-            raise AgnesVideoError(f"无法连接 Agnes API: {exc.reason}") from exc
-        except TimeoutError as exc:
-            raise AgnesVideoError("Agnes API 请求超时。") from exc
+        retry_count = self.settings.get_retry_attempts if method.upper() == "GET" else 0
+        for attempt in range(retry_count + 1):
+            try:
+                with urlopen(request, timeout=self.settings.request_timeout_seconds) as response:
+                    raw = response.read().decode("utf-8")
+                break
+            except HTTPError as exc:
+                detail = exc.read().decode("utf-8", errors="replace")[:600]
+                raise AgnesVideoError(f"Agnes API HTTP {exc.code}: {detail}") from exc
+            except (URLError, TimeoutError, ssl.SSLError, OSError) as exc:
+                if attempt < retry_count:
+                    print(
+                        f"   Agnes GET 网络连接中断，第 {attempt + 1}/{retry_count} 次重试中：{exc}"
+                    )
+                    time.sleep(self.settings.retry_delay_seconds)
+                    continue
+                if isinstance(exc, URLError):
+                    detail = exc.reason
+                elif isinstance(exc, TimeoutError):
+                    detail = "请求超时"
+                else:
+                    detail = str(exc)
+                raise AgnesVideoError(f"无法连接 Agnes API: {detail}") from exc
         try:
             result = json.loads(raw)
         except json.JSONDecodeError as exc:
@@ -219,13 +240,24 @@ class AgnesVideoClient:
         destination.parent.mkdir(parents=True, exist_ok=True)
         temporary = destination.with_suffix(destination.suffix + ".part")
         request = Request(remote_url, method="GET")
-        try:
-            with urlopen(request, timeout=self.settings.request_timeout_seconds) as response:
-                with temporary.open("wb") as output:
-                    shutil.copyfileobj(response, output)
-        except (HTTPError, URLError, TimeoutError) as exc:
-            temporary.unlink(missing_ok=True)
-            raise AgnesVideoError(f"无法下载 Agnes 视频成品: {exc}") from exc
+        for attempt in range(self.settings.get_retry_attempts + 1):
+            try:
+                with urlopen(request, timeout=self.settings.request_timeout_seconds) as response:
+                    with temporary.open("wb") as output:
+                        shutil.copyfileobj(response, output)
+                break
+            except HTTPError as exc:
+                temporary.unlink(missing_ok=True)
+                raise AgnesVideoError(f"无法下载 Agnes 视频成品: HTTP {exc.code}") from exc
+            except (URLError, TimeoutError, ssl.SSLError, OSError, HTTPException) as exc:
+                temporary.unlink(missing_ok=True)
+                if attempt < self.settings.get_retry_attempts:
+                    print(
+                        f"   Agnes 成品下载中断，第 {attempt + 1}/{self.settings.get_retry_attempts} 次重试中：{exc}"
+                    )
+                    time.sleep(self.settings.retry_delay_seconds)
+                    continue
+                raise AgnesVideoError(f"无法下载 Agnes 视频成品: {exc}") from exc
         if temporary.stat().st_size == 0:
             temporary.unlink(missing_ok=True)
             raise AgnesVideoError("下载的视频文件为空。")
