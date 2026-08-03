@@ -1,0 +1,28 @@
+# Secrets and machine-specific configuration
+.env
+.env.*
+!.env.example
+
+# Python environments, caches, and test artefacts
+.venv/
+venv/
+env/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# Runtime data and generated media
+code/outputs/
+code/logs/
+*.log
+*.db
+*.sqlite
+*.sqlite3
+
+# Operating-system and editor files
+.DS_Store
+.idea/
+.vscode/

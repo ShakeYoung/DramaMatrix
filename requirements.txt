@@ -1,0 +1,11 @@
+# Runtime dependencies for DramaMatrix.
+# Install from the repository root with: python -m pip install -r requirements.txt
+
+beautifulsoup4>=4.12,<5.0
+langchain-openai>=0.3,<1.0
+langgraph>=0.2,<1.0
+pydantic>=2.10,<3.0
+python-dotenv>=1.0,<2.0
+requests>=2.32,<3.0
+
+# Video stitching also requires the ffmpeg and ffprobe executables on PATH.
