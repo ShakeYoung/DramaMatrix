@@ -1,0 +1,18 @@
+# 虚拟环境
+venv/
+env/
+.env
+
+# 各种缓存和日志文件
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+logs/
+outputs/
+.pytest_cache/
+.DS_Store
+
+# IDE 配置
+.vscode/
+.idea/

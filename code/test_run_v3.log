@@ -1,0 +1,267 @@
+==========🚀 开始 DramaMatrix [全链路 8-Agent] 模拟流转 🚀==========
+--- [Agent 1: Query & Insight Agent (剧本嗅探者)] ---
+-> 正在查询本地 SQLite 数据库中尚未处理的小说...
+未在数据库找到合适数据，启动 Query Agent (Web Search) 爬虫抓取新小说...
+      [Scraper] Initializing BeautifulSoup Web Scraper...
+      [Scraper] Successfully scraped novel: 万古神帝
+-> 选定小说: 《万古神帝》, 标签: ['男频', '玄幻', '复仇', '爽文']
+
+[状态流转] 当前刚离开节点: agent1_scout
+ -> 当前系统阶段 (system_status): evaluating
+--------------------------------------------------
+--- [Agent 2: Agent Forum & Insight Agent (爆点评估师)] ---
+正在开始对《万古神帝》进行分块分析 (Chunked Analysis) 并准备立项...
+      [Agent Forum] 正在注入先验知识 (Knowledge Injection / RAG)...
+      [Agent Forum] 评论家与受众正在展开辩论 (Unfold a debate)...
+✅ 剧本评估通过。爽度评分: 68
+   Forum 共识: 【爽点分析】1. 核心悬念强烈：开篇即‘天骄被未婚妻杀死’，身份信息差（帝子/公主）与背叛反转符合爆款公式，能瞬间抓住下沉市场注意力。2. 情绪基点明确：主角从云端跌落绝境，为后续‘重生复仇’的极速情绪拉升（绝境->亮牌->反杀）铺设了完美轨道。3. 世界观自带冲突：帝子、公主、八百年时间跨度，为后续身份揭露、势力碾压提供了充足空间。
+【反噬点分析】1. 逻辑硬伤：开篇死亡即‘陨落’，缺乏濒死细节或悬念钩子（如‘但他的一缕神魂未灭’），‘就此陨落’的陈述削弱了重生必然性，节奏略显拖沓。2. 信息差呈现被动：仅交代身份，未在第一章立即通过具体事件（如被嘲弄、逼迫）激活身份落差带来的即时打脸爽感，可能流失追求‘三秒一爽’的观众。3. 情绪拉升延迟：绝境刻画不足，未在第一章内完成‘被逼至绝境->亮出底牌（如重生征兆）’的最小情绪闭环，存在开局节奏风险。
+【妥协裁决】虽在逻辑严谨性与节奏密度上存在缺陷，但核心钩子（帝子被未婚妻杀）的颠覆性强度、身份预设的碾压潜力，以及清晰的情绪拉升路径，使其具备基础爆款框架。建议立项，但必须在前三章内快速补足即时打脸事件、强化绝境压迫感、并明确重生金手指的首次亮相。
+
+[状态流转] 当前刚离开节点: agent2_hook_analyzer
+ -> 当前系统阶段 (system_status): script_drafting
+--------------------------------------------------
+--- [Agent 3: Report Agent (主编剧)] ---
+开始对《万古神帝》进行时间线分析 (Timeline Analysis) 与剧本拆解 (Chunked Reflection)...
+
+
+====== [Report Agent: Master Script Outline] ======
+八百年前，明帝之子、天资绝世的张若尘，在即将与池瑶公主大婚前夕，被其未婚妻池瑶亲手杀死，一代天骄陨落。八百年后，张若尘竟在一具同名少年的体内苏醒，发现这少年是云武郡国九王子，但天生体弱，备受欺凌。他带着前世记忆与滔天恨意，誓要查明当年真相，向池瑶复仇，并重登武道巅峰。故事将围绕张若尘的隐秘重生、暗中成长、逐步揭开惊天阴谋，并最终向昔日爱人兼仇人展开复仇的史诗展开。
+===================================================
+
+      [Report Agent] 大模型调用失败或无API key: 1 validation error for EpisodeState
+script_data
+  Input should be a valid dictionary or instance of EpisodeScriptData [type=model_type, input_value=TimelineEpisode(ep_id='ep...前的阴谋有关？'), input_type=TimelineEpisode]
+    For further information visit https://errors.pydantic.dev/2.12/v/model_type
+      使用内置回退方案生成主梗概和时间线...
+✅ 使用内建兜底方案生成了全剧拆解与前两集大纲。
+
+[状态流转] 当前刚离开节点: agent3_head_writer
+ -> 当前系统阶段 (system_status): ready_for_storyboard
+--------------------------------------------------
+--- [Agent 4: Media Agent (Storyboard & Modal Cards)] ---
+正在向 deepseek-chat 提交分镜转化任务...
+✅ 成功生成 13 条分镜指令。详细 Prompt 如下：
+
+====== [Media Agent: Storyboard Shots] ======
+  [镜头 s1_01] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: A woman stands alone on a rainy city street at night. She is drenched, her hair and clothes clinging to her skin. Streetlights cast a cold, wet glow on the pavement. She looks heartbroken, staring into the distance where a car's taillights disappear.
+    - 对白: (无声哭泣)
+    - 音效: 持续的雨声，远处汽车引擎声渐行渐远，悲伤的钢琴独奏
+----------------------------------------
+  [镜头 s1_02] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on the woman's face. Raindrops mix with tears on her cheeks. Her eyes are red and unfocused, filled with despair. Her lips tremble slightly.
+    - 对白: 
+    - 音效: 清晰的雨滴声，悲伤的钢琴旋律加强
+----------------------------------------
+  [镜头 s1_03] 时长: 4s
+    - 运镜: 中景，向左摇摄 (Medium shot, Pan Left)
+    - 画面: The camera pans left as a sleek, black luxury sedan with tinted windows pulls up smoothly next to the curb, stopping beside the woman. The car's surface is glossy with rain.
+    - 对白: 
+    - 音效: 雨声，汽车轮胎在湿滑路面上的轻柔刹车声，低沉的引擎怠速声
+----------------------------------------
+  [镜头 s1_04] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on the woman's face. She looks confused, her gaze shifting from her own despair to the mysterious car. A flicker of uncertainty crosses her wet face.
+    - 对白: 
+    - 音效: 雨声，引擎怠速声，钢琴声变得悬疑而低沉
+----------------------------------------
+  [镜头 s1_05] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: The rear passenger door of the black sedan opens automatically. A well-dressed chauffeur in a dark suit and hat steps partially into frame, holding an umbrella. He gestures politely for the woman to enter.
+    - 对白: 司机："请上车。"
+    - 音效: 雨声，车门打开的电动声，司机低沉而礼貌的嗓音
+----------------------------------------
+  [镜头 s1_06] 时长: 4s
+    - 运镜: 特写，推近 (Close-up, Zoom in)
+    - 画面: Close-up on the woman's hand hesitating in the rain. She looks at the open car door, then back at the empty street. She slowly makes a decision and reaches towards the door.
+    - 对白: 
+    - 音效: 雨声，悬疑的弦乐逐渐加入，心跳般的低音鼓点
+----------------------------------------
+  [镜头 s1_07] 时长: 4s
+    - 运镜: 车内视角，静态 (Point-of-view from inside car, Static)
+    - 画面: Shot from inside the dimly lit back seat of the car. The woman, seen from behind, climbs in, dripping wet. She settles into the plush leather seat. The door closes, sealing out most of the rain sound.
+    - 对白: 
+    - 音效: 车门关闭的沉闷声，外部雨声变得模糊，车内安静的空调声，紧张的弦乐持续
+----------------------------------------
+  [镜头 s1_08] 时长: 4s
+    - 运镜: 过肩镜头，静态 (Over-the-shoulder shot, Static)
+    - 画面: Over-the-shoulder shot from behind the woman. She is facing the dark, tinted partition window that separates the passenger cabin from the front. Her reflection is faintly visible in the window, showing her nervous expression.
+    - 对白: 女人（颤抖地）："你是谁？为什么要帮我？"
+    - 音效: 女人颤抖的呼吸声，车内环境音，弦乐保持紧张
+----------------------------------------
+  [镜头 s1_09] 时长: 3s
+    - 运镜: 特写，缓慢推近 (Close-up, Slow zoom in)
+    - 画面: Extreme close-up on the woman's eye, reflected in the dark partition window. Her pupil is dilated with fear and curiosity.
+    - 对白: 
+    - 音效: 呼吸声，一个轻微的、意味深长的男性轻笑从扬声器或隔板后传来，音乐骤停
+----------------------------------------
+  [镜头 s1_10] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on the electronic control panel on the door armrest. A backlit button labeled 'Window' is pressed by an unseen hand.
+    - 对白: 
+    - 音效: 轻微的电子按钮点击声
+----------------------------------------
+  [镜头 s1_11] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: The dark tinted partition window between the front and back seats begins to lower smoothly and silently.
+    - 对白: 
+    - 音效: 几乎无声的电动马达声，车窗下降
+----------------------------------------
+  [镜头 s1_12] 时长: 4s
+    - 运镜: 特写，缓慢推近 (Close-up, Slow zoom in)
+    - 画面: As the window lowers, it reveals the profile of a man in the driver's seat. He has a sharp jawline and a confident, slightly mocking smirk. He is the protagonist's rival.
+    - 对白: 
+    - 音效: 完全寂静，只有车窗下降的最后一丝电机声
+----------------------------------------
+  [镜头 s1_13] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: The man slowly turns his head to look directly at the camera (the woman's point of view). His eyes are cold, calculating, and filled with a knowing amusement. He holds her gaze.
+    - 对白: 男人（带着戏谑的微笑）："惊喜吗？"
+    - 音效: 男人低沉、充满掌控感的嗓音。画面定格，音乐不回归。
+----------------------------------------
+=================================================
+
+
+[状态流转] 当前刚离开节点: agent4_storyboard
+ -> 当前系统阶段 (system_status): ready_for_storyboard
+--------------------------------------------------
+--- [Agent 5: Media Agent (AI Director - API/Browser Invocation)] ---
+正在调起虚拟视频底座 API，准备生成 13 个镜头...
+>> [Error API Callback: RENDER_FAIL]
+❌ 拍摄崩溃。已驳回状态(director_rejected)，注入反馈信息。
+>> Router: 检测到退回请求，重新路由至 Agent 4
+
+[状态流转] 当前刚离开节点: agent5_director
+ -> 当前系统阶段 (system_status): blocked_on_ep_01_revision
+--------------------------------------------------
+--- [Agent 4: Media Agent (Storyboard & Modal Cards)] ---
+!! 进入 Recovery 模式 (B计划), 处理反馈: 视频运动连贯度剧烈下降，模型拒绝生成。请将运镜变为 Static 静态。
+正在向 deepseek-chat 提交分镜转化任务...
+✅ 成功生成 13 条分镜指令。详细 Prompt 如下：
+
+====== [Media Agent: Storyboard Shots] ======
+  [镜头 s1_01] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: A woman stands alone on a rainy street at night. She is drenched, her hair clinging to her face. The streetlights cast a cold, wet glow on the pavement around her. She watches a car's taillights disappear into the distance.
+    - 对白: (无声，只有雨声)
+    - 音效: Heavy rain sound, distant traffic, melancholic piano melody
+----------------------------------------
+  [镜头 s1_02] 时长: 3s
+    - 运镜: 面部特写，静态 (Close-up on face, Static)
+    - 画面: Extreme close-up on the woman's face. Raindrops mix with tears on her cheeks. Her eyes are wide open, staring blankly ahead, reflecting the red glow of the vanished taillights. Her lips are slightly parted.
+    - 对白: 
+    - 音效: Rain intensifies, piano melody becomes more somber
+----------------------------------------
+  [镜头 s1_03] 时长: 3s
+    - 运镜: 手部特写，静态 (Close-up on hands, Static)
+    - 画面: Close-up shot of the woman's hands hanging limply by her sides. Raindrops fall onto her pale fingers. A small, cheap-looking ring is on one finger.
+    - 对白: 
+    - 音效: Rain, a single low cello note
+----------------------------------------
+  [镜头 s1_04] 时长: 4s
+    - 运镜: 低角度，静态 (Low angle shot, Static)
+    - 画面: Low angle shot from the wet pavement. The woman's silhouette against the rainy night sky. A sleek, black luxury car with tinted windows pulls up silently beside her, its tires making a soft splash on the wet road.
+    - 对白: 
+    - 音效: Rain, the smooth, quiet hum of a powerful car engine idling, piano stops
+----------------------------------------
+  [镜头 s1_05] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: The woman turns her head slowly to look at the black car. Her expression is one of confusion and exhaustion, not hope. The car's passenger window is rolled down halfway.
+    - 对白: 
+    - 音效: Rain, engine hum, tense silence
+----------------------------------------
+  [镜头 s1_06] 时长: 3s
+    - 运镜: 过肩镜头，静态 (Over-the-shoulder shot, Static)
+    - 画面: Over-the-shoulder shot from inside the car, looking out at the rain-soaked woman. We see the back of the driver's head and shoulder. The woman's confused face is visible through the rain-streaked window.
+    - 对白: Driver (off-screen, muffled): "Get in."
+    - 音效: Rain, a deep, commanding male voice
+----------------------------------------
+  [镜头 s1_07] 时长: 3s
+    - 运镜: 面部特写，静态 (Close-up on face, Static)
+    - 画面: Close-up on the woman's face. A flicker of hesitation, then resignation. She gives a barely perceptible nod.
+    - 对白: 
+    - 音效: Rain, the sound of a car door unlocking with a soft 'clunk'
+----------------------------------------
+  [镜头 s1_08] 时长: 3s
+    - 运镜: 局部特写，静态 (Detail shot, Static)
+    - 画面: Close-up detail shot of the woman's wet hand reaching for the car door handle. The black paint of the car is pristine and reflective.
+    - 对白: 
+    - 音效: Rain, the sound of the car door being opened
+----------------------------------------
+  [镜头 s1_09] 时长: 4s
+    - 运镜: 车内视角，静态 (Interior shot from inside car, Static)
+    - 画面: Static shot from the back seat of the luxury car. The woman slides into the passenger seat, dripping water onto the fine leather. The interior is dark and opulent. The driver's face is not visible, only his hands on the steering wheel.
+    - 对白: 
+    - 音效: Rain outside becomes muffled, the car door closes with a solid 'thud', the engine purrs softly
+----------------------------------------
+  [镜头 s1_10] 时长: 3s
+    - 运镜: 面部特写，静态 (Close-up on face, Static)
+    - 画面: Close-up on the woman's profile as she sits in the passenger seat. She stares straight ahead, shivering slightly. The car's interior light casts soft shadows on her face.
+    - 对白: Woman (whispering): "Thank you..."
+    - 音效: Muffled rain, soft engine hum, her whisper
+----------------------------------------
+  [镜头 s1_11] 时长: 3s
+    - 运镜: 手部特写，静态 (Close-up on driver's hand, Static)
+    - 画面: Extreme close-up on the driver's hand as it moves from the steering wheel. The hand is masculine, well-groomed, and wears an expensive-looking watch. The finger presses a button on the center console.
+    - 对白: 
+    - 音效: A soft electronic 'beep'
+----------------------------------------
+  [镜头 s1_12] 时长: 3s
+    - 运镜: 侧面特写，静态 (Side profile close-up, Static)
+    - 画面: Side profile close-up of the woman. She turns her head slightly towards the driver as she hears the window motor. Her eyes are tired and curious.
+    - 对白: 
+    - 音效: The quiet whirring sound of a power window rolling down completely
+----------------------------------------
+  [镜头 s1_13] 时长: 5s
+    - 运镜: 悬念镜头，静态 (Suspense shot, Static)
+    - 画面: The camera is positioned just behind the woman's shoulder, looking at the driver's window. The tinted window is now fully down. The face of the man in the driver's seat is finally revealed. He is handsome, smirking, and is unmistakably the male lead's rival/business enemy. He looks directly at the camera (the woman).
+    - 对白: 
+    - 音效: The window motor stops. Complete silence for a beat, then a slow, ominous bass tone begins to swell.
+----------------------------------------
+=================================================
+
+
+[状态流转] 当前刚离开节点: agent4_storyboard
+ -> 当前系统阶段 (system_status): blocked_on_ep_01_revision
+--------------------------------------------------
+--- [Agent 5: Media Agent (AI Director - API/Browser Invocation)] ---
+正在调起虚拟视频底座 API，准备生成 13 个镜头...
+✅ 拍摄大获成功。所有的视频片段都符合预期！
+
+[状态流转] 当前刚离开节点: agent5_director
+ -> 当前系统阶段 (system_status): ep_01_generated
+--------------------------------------------------
+--- [Agent 6: Report Agent (Binding and Rendering)] ---
+正在读取 ep_01 的散装镜头并进行 Report Agent 对应的 FFMPEG 自动化物理 Binding (拼轨)...
+-> 自动执行音画同步 (Audio-Video Sync)
+-> 结合大模型推断的 HTML/视频 Styles (特效、转场)
+-> 根据多模态剧本渲染最终大字报字幕
+✅ ep_01 单集成片导出成功 (mp4)。
+
+[状态流转] 当前刚离开节点: agent6_editor
+ -> 当前系统阶段 (system_status): ep_01_ready_for_growth
+--------------------------------------------------
+--- [Agent 7: Report Agent (IR Scoring and Validation / Growth)] ---
+执行 IR(Information Retrieval) 校验与成片评分分析 ep_01 情绪高潮点...
+-> 通过视觉理解切分第2帧至第10帧为 [悬疑反转版素材A]
+-> 切分第15帧至第22帧为 [强情绪发泄版素材B]
+✅ 生成 2 版信息流广告视频。投递至虚拟大盘。
+
+[状态流转] 当前刚离开节点: agent7_growth
+ -> 当前系统阶段 (system_status): ep_01_publishing
+--------------------------------------------------
+--- [Agent 8: Insight Agent (Analytics / Database Mining)] ---
+正在连接 SQLite 数据库拉取各大平台投放消耗与转化核心指标...
+-> 本期数据 (CPA: 11.84, 完播率: 0.39) 已入库。
+-> 正在执行 SQL Query 进行数据洞察分析 (Chunked Analysis)...
+-> 发现: 数据库挖掘显示 ['男频', '玄幻', '复仇', '爽文'] 完播率表现最优 (0.31)。
+✅ 市场偏好提取完毕。建议下期标签: ['男频', '玄幻', '复仇', '爽文']
+
+[状态流转] 当前刚离开节点: agent8_analytics
+ -> 当前系统阶段 (system_status): cycle_completed_ready_for_next
+--------------------------------------------------
+
+==========✅ 最终系统状态 ✅==========

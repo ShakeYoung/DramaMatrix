@@ -1,0 +1,882 @@
+==========🚀 开始 DramaMatrix [全链路 8-Agent] 模拟流转 🚀==========
+--- [Agent 1: Query & Insight Agent (剧本嗅探者)] ---
+-> 正在查询本地 SQLite 数据库中尚未处理的小说...
+未在数据库找到合适数据，启动 Query Agent (Web Search) 爬虫抓取新小说...
+      [Scraper] 目标：扫描笔趣阁/番茄热门推荐排行榜...
+      [Scraper] 正在向 https://www.biquge.com.cn/rank/ 发送 HTTP GET 请求，带着伪装 User-Agent...
+      [Scraper] 获取响应成功，开始解析 DOM 树，提取 class为 '.rank-list a' 的标题与标签...
+      [Scraper] Successfully scraped novel: 万古神帝
+-> 选定小说: 《万古神帝》, 标签: ['男频', '玄幻', '复仇', '爽文']
+
+[状态流转] 当前刚离开节点: agent1_scout
+ -> 当前系统阶段 (system_status): evaluating
+--------------------------------------------------
+--- [Agent 2: Agent Forum & Insight Agent (爆点评估师)] ---
+正在开始对《万古神帝》进行分块分析 (Chunked Analysis) 并准备立项...
+      [Agent Forum] 正在注入先验知识 (Knowledge Injection / RAG)...
+      [Agent Forum] 正在启动 RAG... 连接向量数据库 ChromaDB...
+      [Agent Forum] 检索关键词: 【AI生成的顶级漫剧】【千万级播放爆款短剧】【流量密码】
+      [Agent Forum] 找回 3 条高相关性的 AI 爆款短剧制作先验知识。
+      [Agent Forum] 评论家与受众正在展开辩论 (Unfold a debate)...
+✅ 剧本评估通过。爽度评分: 72
+   Forum 共识: 【毒舌评论家视角】
+1. 逻辑硬伤：开篇即死，缺乏动机铺垫，池瑶公主杀未婚夫的合理性为零，纯粹为惨而惨。
+2. 节奏拖沓：八百年前一笔带过，缺乏具体场景渲染，情绪转折点间隔远超15秒标准。
+3. 视觉奇观缺失：开篇仅有抽象叙述，无任何AI可发挥的“跨维度画面对比”，如神帝陨落时的天地异象等具象描写。
+
+【下沉市场受众视角】
+1. 极致爽感基底："明帝之子"+"被未婚妻杀死"构成黄金反差——身份尊贵者遭至亲背叛，代入感极强。
+2. 情绪浓度达标：开篇即“极度绝望”（陨落），为后续“极限装X”（重生复仇）埋下爆点。
+3. 信息差潜力巨大：“万古神帝”标题已暗示主角隐藏维度，后续可展开“陨落凡胎 vs 神帝真身”的视觉奇观。
+
+【妥协裁决】
+1. 通过原因：核心设定（尊贵身份+至亲背叛+神帝重生）完美契合“信息差与强烈反差”原则，具备改编为视觉奇观的底层架构。
+2. 扣分项：开篇叙述过于平铺，需在改编时用AI补足“神帝陨落”时的天地崩坏、法则溃散等超自然场面，并在前三秒插入“未婚妻挥剑特写→神帝瞳孔倒映星河破碎”的强对比镜头。
+3. 风险提示：必须在前15秒内完成“死亡→转世”的情绪转折，否则将流失下沉市场耐心。
+
+[状态流转] 当前刚离开节点: agent2_hook_analyzer
+ -> 当前系统阶段 (system_status): script_drafting
+--------------------------------------------------
+--- [Agent 3: Report Agent (主编剧)] ---
+开始对《万古神帝》进行时间线分析 (Timeline Analysis) 与剧本拆解 (Chunked Reflection)...
+
+
+====== [Report Agent: Master Script Outline] ======
+八百年前，明帝之子、天骄张若尘被未婚妻池瑶公主背叛杀害。八百年后，他于云武郡国九王子体内重生，记忆觉醒。此世，他身负前世武道记忆与神秘时空神武印记，却开局沦为被废黜、下毒、备受欺凌的废柴王子。张若尘将凭借前世智慧与神帝传承，从微末中崛起，步步为营，查明前世被害真相，清算今世仇敌，并最终向那高踞九天的女帝池瑶，讨回血债，夺回属于自己的一切，重登万古神帝之位。全剧共30集，主线为‘重生复仇’与‘逆袭登顶’，节奏紧凑，打脸不断。
+===================================================
+
+  -> 生成拆解剧集: ep_01
+     [本集大纲]: 昏暗柴房，少年张若尘（现九王子）从剧痛中醒来，脑海中八百年前的记忆如潮水般涌现——他是明帝之子，却被未婚妻池瑶一剑穿心。眼前，恶奴正对他拳打脚踢，讥讽他是‘废物王子’。张若尘强忍毒发剧痛与屈辱，凭借前世意志没有昏厥。他内视己身，发现经脉尽碎，气池枯竭，但灵魂深处，一点神秘的‘时空神武印记’正在微弱闪烁。恶奴奉王后之命，要将他‘处理’掉。危急关头，张若尘以微弱精神力刺激印记，令时空微微凝滞一瞬，趁机用柴棍刺伤恶奴脚踝，惊险逃脱，躲入王室藏书阁的废弃角落。
+     [末尾悬念]: 藏身黑暗中的张若尘，忍着毒发剧痛，指尖触碰到藏书阁灰尘下的一本古老典籍《九天明帝经》残卷。同时，他听到阁楼外传来王后冰冷的声音：‘搜！活要见人，死要见尸。那个废物，必须永远闭嘴。’
+  -> 生成拆解剧集: ep_02
+     [本集大纲]: 追兵脚步声临近，张若尘命悬一线。他强打精神，翻阅《九天明帝经》——这正是他父皇的功法！虽为残卷，但结合他前世的武道理解，他瞬间明悟关键。同时，时空神武印记在危机下自主运转，与明帝经产生共鸣，竟缓慢吸收周围稀薄的时空之力，辅助炼化体内剧毒‘蚀髓散’。过程痛苦万分，他浑身渗出血污与毒质。就在侍卫破门而入的刹那，张若尘体内‘嗤’的一声轻响，第一条破碎的经脉被微弱但精纯的真气勉强贯通，毒势暂缓。他气息瞬间隐匿如顽石，躲过了第一波搜查。深夜，他通过藏书阁密道（前世记忆所知）潜入王室药园外围。
+     [末尾悬念]: 药园中，张若尘正欲采摘一株疗伤草药，却撞见三王子张济与他的表妹林泞姗在月下私会。张济正是奉王后之命，主导废掉‘九王子’修为的元凶之一。张济察觉异动，一道凌厉掌风劈向张若尘藏身的草丛：‘何方鼠辈，滚出来！’
+  -> 生成拆解剧集: ep_03
+     [本集大纲]: 掌风袭来，张若尘凭借前世战斗本能，以毫厘之差翻滚躲开，但肩头仍被劲气擦伤，鲜血直流。他屏息凝神，融入阴影（时空印记赋予的微弱隐匿效果）。张济搜寻无果，与林泞姗对话。张若尘偷听到惊人阴谋：王后欲彻底铲除他，不仅因他母妃旧怨，更因他可能‘意外’知晓了某个关于‘池瑶女帝’和当年明帝之乱的秘密。张济提及三日后‘王族武市’开启，将是当众羞辱并‘合法’解决九王子的好机会。二人离开后，张若尘冒险采得几株关键草药‘清髓花’和‘血参须’。返回藏书阁密室，他连夜以秘法炼制简易药液，配合明帝经，加速疗伤与解毒。
+     [末尾悬念]: 药力化开，张若尘气池内再生出一缕真气，修为恢复至‘黄极境初期’。但与此同时，他灵魂深处的时空印记突然剧烈震动，投射出一段模糊的幻象：八百年前，池瑶公主杀他之时，眼中似乎闪过一丝难以言喻的悲恸与决绝，而她身后，隐约有一道笼罩在无尽圣光中的恐怖身影……幻象戛然而止，张若尘吐血，心中骇然：‘当年之事，另有隐情？’
+  -> 生成拆解剧集: ep_04
+     [本集大纲]: 三日后，王族武市，云武郡国年轻子弟汇聚。王后与国王端坐主位。张若尘被侍卫‘请’到现场，他面色依旧苍白，步履虚浮，坐实了‘废人’形象。张济率先发难，当众讥讽他玷污王室颜面，提议将其驱逐出王族。林泞姗亦冷言附和。众子弟哄笑。国王面露不忍但沉默。王后顺势提出，若张若尘能接住同辈子弟三招，便可保留王子身份。这分明是死局。张济的狗腿子、黄极境中期的‘张猛’跳出来，要‘指点’九王子。第一招，张猛重拳直击张若尘面门，意在必杀。
+     [末尾悬念]: 众人都以为张若尘必死无疑。然而，电光石火间，张若尘脚下步伐玄妙一错（前世身法雏形），竟以毫厘之差避开拳锋，同时并指如剑，后发先至，精准点中张猛手腕要穴。张猛惨叫一声，整条手臂软垂，踉跄后退。全场瞬间死寂，所有人瞪大眼睛，难以置信地看着依旧站在原地、气息微弱的张若尘。王后眼中寒光骤闪。
+  -> 生成拆解剧集: ep_05
+     [本集大纲]: 张猛又惊又怒，使出武技‘开山掌’第二招，威力倍增。张若尘不再闪避，运转刚刚恢复的微薄真气，结合前世对武道本质的理解，以指代剑，精准刺入掌风最薄弱处。‘噗！’张猛掌心被刺穿，鲜血淋漓，惨败倒地。全场哗然！一个‘废人’竟两招击败黄极境中期？张济脸色铁青。王后正要发作，武市中一位来自更高层势力‘武市钱庄’的执事却突然开口，对张若尘精妙的‘眼力’和‘发力技巧’表示兴趣。为缓和局面（实则为更狠的算计），国王提出赌约：若张若尘能在半月后的‘王山狩猎’中，取得超过张济的成绩，则过往不究，恢复其一切待遇；若不能，则自愿流放边荒。张若尘被迫应下。散场时，他体内的时空印记突然对武市深处某个摊位上的一块布满锈迹的青铜碎片，产生了强烈的渴望与共鸣。
+     [末尾悬念]: 深夜，张若尘秘密潜入武市，找到那个摊位，拿到了那块不起眼的青铜碎片。当碎片入手瞬间，时空印记光芒大盛，碎片上的锈迹剥落，露出部分古老纹路，一股浩瀚的时空信息冲入张若尘脑海。他闷哼一声，看到幻象：无尽的星空，一座崩塌的神殿，以及神殿王座上，一具与自己前世容貌有几分相似的……帝尸？！与此同时，摊位阴影中，一个戴着斗笠的神秘人缓缓抬头，目光锁定了张若尘手中的碎片，低语：‘时空传承的波动……终于出现了。’
+✅ 完成 Final Report: 共切分 5 集。
+
+[状态流转] 当前刚离开节点: agent3_head_writer
+ -> 当前系统阶段 (system_status): ready_for_storyboard
+--------------------------------------------------
+正在向 deepseek-chat 提交 ep_01 的分镜转化任务...
+✅ 成功生成 ep_01 的 22 条分镜指令。详细 Prompt 如下：
+
+====== [Media Agent: Storyboard Shots for ep_01] ======
+  [镜头 s1_01] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Extreme close-up of a young man's face, eyes closed, covered in dirt and sweat, lying on a rough wooden floor. Flickering candlelight from off-screen illuminates his pained expression.
+    - 对白: (无)
+    - 音效: 沉重的呼吸声，远处微弱的滴水声，环境音压抑。
+----------------------------------------
+  [镜头 s1_02] 时长: 3s
+    - 运镜: 主观镜头，快速推近 (POV, Zoom in)
+    - 画面: A blurry, fast-moving flashback shot: a beautiful woman in regal attire thrusts a gleaming sword towards the camera (viewer's chest). The image is fragmented and dream-like.
+    - 对白: (内心独白/记忆回响) 池瑶...
+    - 音效: 刺耳的金属摩擦声，心跳声骤然放大，随后是记忆的嗡鸣声。
+----------------------------------------
+  [镜头 s1_03] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: A dimly lit woodshed. A cruel-looking servant in coarse clothes is kicking a young man (Zhang Ruochen) who is curled up on the floor. Dust motes float in the slivers of light from a high window.
+    - 对白: 恶奴：废物王子！醒醒！别给老子装死！
+    - 音效: 拳脚踢打在身体上的闷响，恶奴粗鲁的骂声，环境音肮脏杂乱。
+----------------------------------------
+  [镜头 s1_04] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on Zhang Ruochen's face. His eyes are now open, filled with pain and a deep, ancient resolve. He bites his lower lip to suppress a groan. Sweat drips from his temple.
+    - 对白: (无声)
+    - 音效: 沉重的呼吸声，压抑的痛哼，恶奴的讥笑声在背景中。
+----------------------------------------
+  [镜头 s1_05] 时长: 4s
+    - 运镜: 主观镜头/抽象视觉，静态 (POV/Abstract, Static)
+    - 画面: An internal visualization: a network of glowing lines (meridians) is shown shattered and dark. A central pool (energy pool) is empty and cracked. The image is monochrome and desolate.
+    - 对白: (内心独白) 经脉尽碎...气池枯竭...
+    - 音效: 空灵而破碎的音效，微弱的心跳声。
+----------------------------------------
+  [镜头 s1_06] 时长: 3s
+    - 运镜: 极端特写，静态 (Extreme Close-up, Static)
+    - 画面: Deep within the previous abstract image, a tiny, intricate symbol (Time-Space Godly Martial Mark) flickers with a faint, ethereal blue light amidst the darkness.
+    - 对白: (内心独白) 这是...
+    - 音效: 非常微弱的、如水晶震颤般的高频音效，神秘而空灵。
+----------------------------------------
+  [镜头 s1_07] 时长: 4s
+    - 运镜: 中景，摇摄 (Medium shot, Pan Right)
+    - 画面: The servant stops kicking and leans down, grabbing Zhang Ruochen by the collar. He sneers into Zhang's face.
+    - 对白: 恶奴：王后有令，你这废物，该“处理”掉了。这柴房，就是你的坟地！
+    - 音效: 恶奴阴冷的声音，衣服摩擦声，紧张的低音提琴旋律引入。
+----------------------------------------
+  [镜头 s1_08] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on Zhang Ruochen's eyes. The ancient resolve intensifies. He focuses inward, a slight strain visible around his eyes.
+    - 对白: (无声)
+    - 音效: 呼吸声变得急促而集中，神秘印记的微弱音效再次响起并增强。
+----------------------------------------
+  [镜头 s1_09] 时长: 2s
+    - 运镜: 广角，动态模糊 (Wide shot, Motion Blur)
+    - 画面: The entire scene in the woodshed seems to freeze for a split second. Dust motes hang motionless in the air. The servant's sneering expression is stuck. The effect is subtle and brief.
+    - 对白: (无)
+    - 音效: 所有环境音骤然停止，只留下一声拉长的、扭曲的嗡鸣。
+----------------------------------------
+  [镜头 s1_10] 时长: 2s
+    - 运镜: 中景，快速跟踪 (Medium shot, Quick Tracking)
+    - 画面: Zhang Ruochen moves with sudden, desperate speed. His hand shoots out and grabs a broken piece of firewood from the floor.
+    - 对白: (无声)
+    - 音效: 急促的摩擦声，时间恢复正常的“砰”一声轻响，紧张的音乐节奏加快。
+----------------------------------------
+  [镜头 s1_11] 时长: 3s
+    - 运镜: 低角度特写，静态 (Low-angle Close-up, Static)
+    - 画面: A sharp, splintered end of the firewood stabs forcefully into the servant's ankle, just above his rough shoe. A small spray of blood.
+    - 对白: 恶奴：啊——！我的脚！
+    - 音效: 木棍刺入肉体的闷响，恶奴痛苦的惨叫。
+----------------------------------------
+  [镜头 s1_12] 时长: 4s
+    - 运镜: 中景，摇摄左 (Medium shot, Pan Left)
+    - 画面: The servant collapses, clutching his ankle. Zhang Ruochen scrambles to his feet, staggering, and lunges towards the slightly ajar woodshed door.
+    - 对白: 恶奴：废物！你竟敢...！站住！
+    - 音效: 恶奴的怒骂和痛呼，张若尘踉跄的脚步声，门轴吱呀声。
+----------------------------------------
+  [镜头 s1_13] 时长: 5s
+    - 运镜: 手持跟拍，晃动 (Handheld Tracking, Shaky)
+    - 画面: Zhang Ruochen's POV as he runs/stumbles through dim, deserted palace corridors at night. The camera is unsteady, reflecting his pain and panic.
+    - 对白: (沉重的呼吸声)
+    - 音效: 急促的喘息和脚步声，心跳声如鼓，紧张追逐的BGM。
+----------------------------------------
+  [镜头 s1_14] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ruochen pushes open a heavy, ornate door marked “Royal Archives” and slips inside, closing it quietly behind him.
+    - 对白: (无声)
+    - 音效: 沉重的木门开启和关闭的吱呀声，呼吸声稍缓。
+----------------------------------------
+  [镜头 s1_15] 时长: 5s
+    - 运镜: 广角，缓慢推进 (Wide shot, Slow Zoom in)
+    - 画面: Inside the royal archives. A vast, dark space filled with towering shelves of scrolls and books. Moonlight filters through high windows, illuminating dust in the air. Zhang Ruochen is a small figure crouching in a shadowy corner between shelves.
+    - 对白: (无)
+    - 音效: 绝对的寂静，只有细微的尘埃飘落声，空旷的回音。BGM转为低沉、悬疑的弦乐。
+----------------------------------------
+  [镜头 s1_16] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on Zhang Ruochen's face in the shadows. He is clutching his abdomen, face pale with pain (from poison). He is trying to control his breathing.
+    - 对白: (痛苦的吸气声)
+    - 音效: 压抑的痛哼，细微的颤抖声。
+----------------------------------------
+  [镜头 s1_17] 时长: 4s
+    - 运镜: 特写，缓慢下移 (Close-up, Slow Pan Down)
+    - 画面: His trembling hand reaches out and brushes away a thick layer of dust on the floor in front of him, revealing the corner of an ancient, leather-bound book.
+    - 对白: (无声)
+    - 音效: 手指划过灰尘的沙沙声，心跳声再次变得清晰。
+----------------------------------------
+  [镜头 s1_18] 时长: 3s
+    - 运镜: 极端特写，静态 (Extreme Close-up, Static)
+    - 画面: His fingertips make contact with the book's cover. Faded, gilded characters are barely visible: 《九天明帝经》.
+    - 对白: (内心独白) 这是...《九天明帝经》？
+    - 音效: 接触的瞬间，一声非常轻微但清脆的“叮”或翻页声效，神秘感音乐点缀。
+----------------------------------------
+  [镜头 s1_19] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Zhang Ruochen's eyes widen slightly, a mix of shock, pain, and a flicker of desperate hope.
+    - 对白: (无声)
+    - 音效: 呼吸声骤然停顿。
+----------------------------------------
+  [镜头 s1_20] 时长: 3s
+    - 运镜: 中景，从张若尘背后拍摄，推向门 (Medium shot from behind Zhang, Zoom in towards door)
+    - 画面: From Zhang's hiding place, we see the distant, heavy main door of the archives. A sliver of torchlight appears under the door.
+    - 对白: (门外，冰冷的女声) 搜！
+    - 音效: 沉重的脚步声和盔甲摩擦声从门外传来，突然的指令声打破寂静。
+----------------------------------------
+  [镜头 s1_21] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on Zhang Ruochen's face, now frozen in tension. His eyes dart from the book under his hand to the sliver of light under the distant door.
+    - 对白: (无声)
+    - 音效: 所有声音压低，只剩下紧张到极致的心跳声。
+----------------------------------------
+  [镜头 s1_22] 时长: 5s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: The cold, authoritative voice of the Queen Mother filters clearly through the thick door, echoing in the silent archive.
+    - 对白: 王后（OS，冰冷）：活要见人，死要见尸。那个废物，必须永远闭嘴。
+    - 音效: 王后清晰而冷酷的声音，带着不容置疑的杀意。门外搜索的声响加剧。BGM在最后一句话处戛然而止，留下危险的寂静。
+----------------------------------------
+=================================================
+
+正在向 deepseek-chat 提交 ep_02 的分镜转化任务...
+      [Media Agent] LLM 链条抛出异常或无API key: Failed to parse StoryboardOutput from completion {"shots": [{"shot_id": "s2_01", "camera": "特写，Zoom in", "visual_prompt": "Extreme close-up of a man's ear pressed against a wooden door. Sweat drips from his temple. His eyes are wide with tension.", "dialogue": "(画外音，沉重的脚步声由远及近)", "duration": "4s", "audio": "急促紧张的弦乐，沉重的皮靴踩踏石板路的回声"}, {"shot_id": "s2_02", "camera": "中景，Static", "visual_prompt": "A young man in torn royal robes (Zhang Ruochen) leans against a dusty bookshelf in a dimly lit room. He clutches his chest, face pale, breathing heavily.", "dialogue": "张若尘：（低声喘息）来不及了……", "duration": "3s", "audio": "急促的呼吸声，远处模糊的呼喊声"}, {"shot_id": "s2_03", "camera": "特写，Static", "visual_prompt": "Close-up of a hand trembling as it opens an ancient, worn leather-bound book titled 'Nine Heaven Ming Emperor Scripture'.", "dialogue": "", "duration": "3s", "audio": "翻动古老书页的沙沙声，心跳声加剧"}, {"shot_id": "s2_04", "camera": "特写，Zoom in", "visual_prompt": "Close-up of Zhang Ruochen's eyes. His pupils contract sharply, then a flash of recognition and profound understanding crosses his face.", "dialogue": "张若尘：（内心独白）父皇的功法……这残卷……原来如此！", "duration": "4s", "audio": "顿悟般的空灵音效，背景弦乐转为深邃"}, {"shot_id": "s2_05", "camera": "特写，Static", "visual_prompt": "Close-up of the back of Zhang Ruochen's right hand. A faint, intricate silver mark glows softly under the skin.", "dialogue": "", "duration": "3s", "audio": "细微的、如同空间扭曲的嗡鸣声"}, {"shot_id": "s2_06", "camera": "中景，Static", "visual_prompt": "Zhang Ruochen sits cross-legged on the floor. Faint, shimmering silver threads of light swirl slowly around his body, drawing in specks of dust that glow briefly.", "dialogue": "", "duration": "4s", "audio": "低沉的时空共鸣声，环境变得异常安静"}, {"shot_id": "s2_07", "camera": "特写，Static", "visual_prompt": "Close-up of Zhang Ruochen's face contorted in extreme pain. Black viscous fluid mixed with blood seeps from his pores, staining his skin and robes.", "dialogue": "张若尘：（压抑的闷哼）呃……", "duration": "4s", "audio": "痛苦的喘息声，体内仿佛有东西被撕裂的细微声响"}, {"shot_id": "s2_08", "camera": "特写，Tracking (跟随手臂)", "visual_prompt": "Tracking shot following a stream of black poison being forced out of a vein on Zhang Ruochen's forearm. It drips onto the wooden floor, sizzling and emitting a faint smoke.", "dialogue": "", "duration": "4s", "audio": "毒液腐蚀地板的滋滋声，沉重的呼吸"}, {"shot_id": "s2_09", "camera": "中景，Pan Left (扫过房门)", "visual_prompt": "The wooden door of the room shakes violently as someone pounds on it from the outside. Dust falls from the frame.", "dialogue": "(画外音) 侍卫：在里面！破门！", "duration": "3s", "audio": "猛烈的撞门声，木头开裂声，金属铠甲碰撞声"}, {"shot_id": "s2_10", "camera": "极端特写，Static", "visual_prompt": "Extreme close-up inside Zhang Ruochen's body (象征性画面). A shattered meridian channel, glowing with a weak but pure golden light, suddenly reconnects with a soft 'snap'.", "dialogue": "(音效：体内一声轻微的‘嗤’响)", "duration": "3s", "audio": "清脆的“嗤”声，如同细线绷紧后连接，背景音乐骤停一瞬"}, {"shot_id": "s2_11", "camera": "特写，Zoom out", "visual_prompt": "Zhang Ruochen's entire body relaxes. The pain on his face vanishes, replaced by utter stillness. His breathing becomes almost imperceptible.", "dialogue": "", "duration": "3s", "audio": "瞬间的绝对寂静，只有极其微弱的心跳声"}, {"shot_id": "s2_12", "camera": "中景，Static", "visual_prompt": "The door bursts open. Two armored guards rush in, swords drawn. They look around the dusty, seemingly empty room with confusion.", "dialogue": "侍卫甲：奇怪，没人？", "duration": "4s", "audio": "破门而入的巨响，铠甲摩擦声，疑惑的对话"}, {"shot_id": "s2_13", "camera": "低角度，Static (从书架阴影处拍摄)", "visual_prompt": "Low-angle shot from a dark corner behind a bookshelf. The guards' boots are visible as they walk past, missing Zhang Ruochen who is perfectly still in the shadows, covered in dust and blending with the surroundings.", "dialogue": "侍卫乙：搜仔细点！", "duration": "4s", "audio": "脚步声，翻动物品的声音"}, {"shot_id": "s2_14", "camera": "特写，Static", "visual_phenomenon": "Close-up of Zhang Ruochen's eye in the darkness, watching the guards leave. The eye blinks once, slowly.", "dialogue": "", "duration": "3s", "audio": "守卫远去的脚步声，夜晚虫鸣渐起"}, {"shot_id": "s2_15", "camera": "中景，Tracking (跟随移动)", "visual_prompt": "Night time. Zhang Ruochen, moving silently like a shadow, pushes aside a section of a bookshelf to reveal a hidden passage. He slips inside.", "dialogue": "", "duration": "4s", "audio": "石板摩擦的轻微声响，隐秘的通道回声，悬疑的BGM"}, {"shot_id": "s2_16", "camera": "主观视角，Pan Right", "visual_prompt": "POV shot from inside the dark, narrow stone tunnel. A faint moonlight glows at the far end.", "dialogue": "", "duration": "3s", "audio": "轻微的脚步声，滴水声，呼吸声"}, {"shot_id": "s2_17", "camera": "中景，Static", "visual_prompt": "Zhang Ruochen emerges from a hidden exit behind some thick bushes at the edge of a lush, moonlit medicinal herb garden. He scans the area cautiously.", "dialogue": "", "duration": "4s", "audio": "夜晚花园的环境音（虫鸣，微风），舒缓但略带紧张的BGM"}, {"shot_id": "s2_18", "camera": "特写，Zoom in", "visual_prompt": "Close-up of Zhang Ruochen's hand reaching towards a glowing, silvery herb with delicate leaves (Healing Spirit Grass). His fingers are just about to touch it.", "dialogue": "", "duration": "3s", "audio": "动作停顿的寂静，只有微风声"}, {"shot_id": "s2_19", "camera": "中远景，Static", "visual_prompt": "Wide shot of the moonlit garden. In the distance, under a pavilion, a handsome but arrogant young man in rich robes (Third Prince Zhang Ji) is intimately holding hands with a beautiful young woman in elegant dress (Lin Ningshan).", "dialogue": "林泞姗：（娇笑）三哥，你答应我的事可别忘了。", "duration": "5s", "audio": "隐约传来的女子娇笑声，男子低沉的说话声"}, {"shot_id": "s2_20", "camera": "特写，Static", "visual_prompt": "Close-up of Zhang Ruochen's face. His eyes widen in shock and recognition, then narrow with intense cold hatred. He recognizes Zhang Ji.", "dialogue": "张若尘：（内心独白，无声）张济……！", "duration": "4s", "audio": "BGM骤变为危险的低音脉冲，心跳声砰然加重"}, {"shot_id": "s2_21", "camera": "中景，Static (张济视角转向草丛)", "visual_prompt": "Zhang Ji suddenly stops talking. His head snaps towards the direction of Zhang Ruochen's hiding spot in the bushes. His expression turns sharp and suspicious.", "dialogue": "张济：（冷声）嗯？", "duration": "3s", "audio": "所有声音瞬间停止，只剩下危险的寂静"}, {"shot_id": "s2_22", "camera": "特写，Static (张济的手)", "visual_prompt": "Close-up of Zhang Ji's hand. True energy visibly gathers around his palm, causing the air to distort slightly.", "dialogue": "", "duration": "3s", "audio": "能量汇聚的轻微呼啸声"}, {"shot_id": "s2_23", "camera": "中景，Zoom in (对准草丛)", "visual_prompt": "Zhang Ji, without warning, thrusts his palm forward. A visible,凌厉的 semi-transparent palm force shoots towards the dense bushes where Zhang Ruochen is hiding, cutting through the air.", "dialogue": "张济：（厉喝）何方鼠辈，滚出来！", "duration": "4s", "audio": "凌厉的掌风破空声，张济的怒喝，BGM推向高潮并戛然而止"}]}. Got: 1 validation error for StoryboardOutput
+shots.13.visual_prompt
+  Field required [type=missing, input_value={'shot_id': 's2_14', 'cam...，夜晚虫鸣渐起'}, input_type=dict]
+    For further information visit https://errors.pydantic.dev/2.12/v/missing
+For troubleshooting, visit: https://docs.langchain.com/oss/python/langchain/errors/OUTPUT_PARSING_FAILURE 
+      使用内置兜底方案生成 Modal Cards...
+正在向 deepseek-chat 提交 ep_03 的分镜转化任务...
+✅ 成功生成 ep_03 的 25 条分镜指令。详细 Prompt 如下：
+
+====== [Media Agent: Storyboard Shots for ep_03] ======
+  [镜头 ep03_s01] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: A young man in ancient Chinese robes (Zhang Ruochen) is lying on the ground in a dark alley. A powerful palm strike with visible air distortion is about to hit him from off-screen. His eyes are wide with alarm.
+    - 对白: 
+    - 音效: Sudden sharp whoosh of a palm strike, tense and suspenseful background music.
+----------------------------------------
+  [镜头 ep03_s02] 时长: 3s
+    - 运镜: 特写，快速向左摇 (Close-up, Pan Left)
+    - 画面: Extreme close-up of Zhang Ruochen's face. His pupils contract. He immediately rolls to the left with a swift, instinctive movement, his hair and robes fluttering.
+    - 对白: 
+    - 音效: Sound of body rolling on rough ground, fabric rustling, continued tense music.
+----------------------------------------
+  [镜头 ep03_s03] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ruochen has finished rolling and is crouched low. A visible streak of sharp energy grazes his left shoulder, tearing his robe. A splash of blood appears on the fabric.
+    - 对白: (Grunts in pain)
+    - 音效: Sizzling sound of energy grazing flesh, a pained grunt, dramatic sting in music.
+----------------------------------------
+  [镜头 ep03_s04] 时长: 4s
+    - 运镜: 特写，缓慢推进 (Close-up, Zoom in)
+    - 画面: Close-up on Zhang Ruochen's injured shoulder. Blood is seeping through the torn dark blue robe. He clenches his teeth, his face pale but determined.
+    - 对白: 
+    - 音效: Heavy breathing, low throbbing pain sound effect, suspenseful ambient music.
+----------------------------------------
+  [镜头 ep03_s05] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ruochen takes a deep breath and closes his eyes. When he opens them, his figure seems to blend slightly into the deep shadows of the alley wall behind him, becoming less distinct.
+    - 对白: 
+    - 音效: Sound of a deep, controlled inhale and exhale. The ambient music becomes quieter, more mysterious.
+----------------------------------------
+  [镜头 ep03_s06] 时长: 4s
+    - 运镜: 过肩镜头，向右摇 (Over-the-shoulder shot, Pan Right)
+    - 画面: From Zhang Ruochen's hidden perspective, we see Zhang Ji walking into the alley, looking around suspiciously. His expression is cold and searching.
+    - 对白: Zhang Ji: "Hmph, ran fast."
+    - 音效: Footsteps on stone, Zhang Ji's voice, low and menacing. Eerie, quiet background music.
+----------------------------------------
+  [镜头 ep03_s07] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Lin Ningshan walks into the frame from the other side of the alley, joining Zhang Ji. She looks around nervously.
+    - 对白: Lin Ningshan: "Did you find him?"
+    - 音效: Light female footsteps, her voice tinged with anxiety.
+----------------------------------------
+  [镜头 ep03_s08] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on Zhang Ji's face as he sneers. He shakes his head slightly.
+    - 对白: Zhang Ji: "No matter. A crippled prince can't go far. The Queen's orders are clear."
+    - 音效: His voice is a conspiratorial whisper. Ominous, low strings in the background.
+----------------------------------------
+  [镜头 ep03_s09] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on Lin Ningshan's face, her eyes showing a flicker of complex emotion—fear, guilt, and resolve.
+    - 对白: Lin Ningshan: "It's not just about old grievances with his mother, is it?"
+    - 音效: Her voice is hesitant. The music holds a note of tension.
+----------------------------------------
+  [镜头 ep03_s10] 时长: 5s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ji leans closer to Lin Ningshan, his voice dropping even lower. The shadow where Zhang Ruochen hides is in the background, slightly out of focus.
+    - 对白: Zhang Ji: "The Queen fears he might have 'accidentally' learned something... about Empress Chi Yao and the turmoil surrounding the late Ming Emperor."
+    - 音效: A very low, secretive whisper. A single deep, ominous chord plays.
+----------------------------------------
+  [镜头 ep03_s11] 时长: 4s
+    - 运镜: 特写，缓慢推进 (Close-up, Zoom in)
+    - 画面: Extreme close-up on Zhang Ruochen's eye, peering from the shadows. His pupil trembles slightly upon hearing the revelation.
+    - 对白: 
+    - 音效: A sharp, subtle intake of breath from Zhang Ruochen. The music becomes a tense, pulsing rhythm.
+----------------------------------------
+  [镜头 ep03_s12] 时长: 5s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ji straightens up, a cruel smile on his face. He gestures with his hand.
+    - 对白: Zhang Ji: "In three days, the Royal Martial Market opens. It will be the perfect public stage to humiliate the Ninth Prince... and 'legally' resolve this problem."
+    - 音效: Confident, malicious tone. The music swells with dark anticipation.
+----------------------------------------
+  [镜头 ep03_s13] 时长: 4s
+    - 运镜: 远景，向左摇 (Wide shot, Pan Left)
+    - 画面: Zhang Ji and Lin Ningshan turn and walk away down the alley, their figures growing smaller. The camera pans left to reveal the dark corner where Zhang Ruochen is hidden.
+    - 对白: 
+    - 音效: Retreating footsteps. The music transitions to a determined, stealthy theme.
+----------------------------------------
+  [镜头 ep03_s14] 时长: 4s
+    - 运镜: 中景，跟踪镜头 (Medium shot, Tracking)
+    - 画面: Zhang Ruochen emerges cautiously from the shadows, clutching his wounded shoulder. He moves quickly but quietly through a moonlit forest at the palace's edge.
+    - 对白: 
+    - 音效: Cautious footsteps on grass and leaves, night insects chirping, determined background music.
+----------------------------------------
+  [镜头 ep03_s15] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on Zhang Ruochen's hand carefully plucking a delicate, glowing white flower (Qing Sui Hua) from under a rock.
+    - 对白: 
+    - 音效: Delicate plucking sound, magical shimmer sound effect.
+----------------------------------------
+  [镜头 ep03_s16] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on his other hand digging gently at the root of a ginseng-like plant, extracting a few crimson, thread-like roots (Blood Ginsen Threads).
+    - 对白: 
+    - 音效: Sound of digging in soft soil, subtle rustling.
+----------------------------------------
+  [镜头 ep03_s17] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Inside the secret room of the library pavilion. Zhang Ruochen is sitting cross-legged. In front of him is a small, simple bronze cauldron over a low flame. He carefully adds the herbs.
+    - 对白: 
+    - 音效: Crackling of a small fire, bubbling of liquid in a pot. Calm, focused music.
+----------------------------------------
+  [镜头 ep03_s18] 时长: 4s
+    - 运镜: 特写，缓慢推进 (Close-up, Zoom in)
+    - 画面: Close-up on the cauldron. The liquid inside turns a clear, faintly golden color with wisps of red. Steam rises, carrying a herbal scent.
+    - 对白: 
+    - 音效: Intensified bubbling, a light ethereal chime sound.
+----------------------------------------
+  [镜头 ep03_s19] 时长: 5s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ruochen pours the finished medicinal liquid into a jade bowl. He takes a deep breath, then drinks it in one gulp. He immediately closes his eyes and assumes a meditation posture.
+    - 对白: 
+    - 音效: Sound of liquid being poured and swallowed. Music shifts to internal, mystical tones.
+----------------------------------------
+  [镜头 ep03_s20] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on Zhang Ruochen's lower abdomen (dantian area). A faint, warm golden light glows through his robes, pulsing gently.
+    - 对白: 
+    - 音效: A low, powerful hum. The sound of energy circulating.
+----------------------------------------
+  [镜头 ep03_s21] 时长: 5s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Zhang Ruochen opens his eyes. They shine with a renewed sharpness and vitality. A trickle of black blood seeps from a puncture wound on his wrist and evaporates into black smoke.
+    - 对白: (Whispers) "Huangji Realm, Initial Stage... restored."
+    - 音效: A cleansing, expelling sound effect. His whisper is filled with relief and strength. Uplifting music swell.
+----------------------------------------
+  [镜头 ep03_s22] 时长: 3s
+    - 运镜: 极端特写，剧烈震动 (Extreme close-up, intense shaking)
+    - 画面: Extreme close-up on Zhang Ruochen's forehead. A complex, ancient mark (the Time-Space Mark) suddenly becomes visible under his skin and begins to vibrate violently, emitting chaotic light.
+    - 对白: 
+    - 音效: A sudden, distorted, high-frequency ringing sound. All other music cuts out.
+----------------------------------------
+  [镜头 ep03_s23] 时长: 4s
+    - 运镜: 第一人称视角，模糊扭曲 (First-person POV, blurry and distorted)
+    - 画面: A blurry, fast-moving flashback scene. The view is from Zhang Ruochen's past perspective. Princess Chi Yao stands before him, her divine sword piercing his chest. Her beautiful face is streaked with tears, her eyes filled with an indescribable blend of immense sorrow and unwavering resolve.
+    - 对白: (Echoing memory) "Forgive me..."
+    - 音效: Echoing, distorted voice of Chi Yao. The sound of a sword piercing flesh. Haunting, tragic music.
+----------------------------------------
+  [镜头 ep03_s24] 时长: 3s
+    - 运镜: 快速变焦，静态 (Quick zoom out, then Static)
+    - 画面: The vision pulls back rapidly. Behind the weeping Chi Yao, a towering, majestic figure is vaguely outlined within blinding, infinite holy light. The figure's features are completely obscured, radiating overwhelming pressure and majesty.
+    - 对白: 
+    - 音效: A overwhelming chorus of heavenly voices, a deep, terrifying hum of power. Music becomes epic and terrifying.
+----------------------------------------
+  [镜头 ep03_s25] 时长: 5s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Back in the secret room. The vision shatters. Zhang Ruochen's eyes snap open, wide with shock and horror. He convulses and coughs up a mouthful of bright red blood onto the floor.
+    - 对白: (Coughing violently) "The events of that year... there's more to it?"
+    - 音效: The vision sounds cut abruptly. Harsh coughing, blood spattering. A final, suspenseful musical cliffhanger note. Silence.
+----------------------------------------
+=================================================
+
+正在向 deepseek-chat 提交 ep_04 的分镜转化任务...
+✅ 成功生成 ep_04 的 22 条分镜指令。详细 Prompt 如下：
+
+====== [Media Agent: Storyboard Shots for ep_04] ======
+  [镜头 s4_01] 时长: 4s
+    - 运镜: 广角镜头，缓慢摇摄 (Wide shot, slow pan)
+    - 画面: A grand martial arts arena in a palace courtyard. Banners of the Yunwu Kingdom flutter. Hundreds of young nobles in fine martial attire stand in orderly rows. The King and Queen sit on a high platform under a canopy.
+    - 对白: (人群嘈杂声，兵器碰撞的轻微回响)
+    - 音效: 庄严的宫廷音乐，混杂人群低语 (Solemn palace music, mixed with crowd murmur)
+----------------------------------------
+  [镜头 s4_02] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Close-up on the King's face. He looks troubled, his fingers gripping the armrest of his throne. He avoids looking directly at the arena center.
+    - 对白: 
+    - 音效: 音乐声减弱，突出国王沉重的呼吸声 (Music fades, highlighting the King's heavy breathing)
+----------------------------------------
+  [镜头 s4_03] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Close-up on the Queen's face. She wears a cold, calculating smile, her eyes sharp as she surveys the crowd below.
+    - 对白: 
+    - 音效: 音乐中融入一丝阴冷的弦乐 (A cold, sinister string note joins the music)
+----------------------------------------
+  [镜头 s4_04] 时长: 5s
+    - 运镜: 中景，跟拍 (Medium shot, Tracking)
+    - 画面: Two palace guards in armor flank Zhang Ruochen. He walks slowly, his face pale, his steps unsteady. He occasionally coughs weakly into his sleeve.
+    - 对白: 侍卫：九王子，请。 (Guard: Ninth Prince, this way.)
+    - 音效: 沉重的脚步声，铁甲摩擦声，微弱的咳嗽声 (Heavy footsteps, clanking of armor, weak coughing)
+----------------------------------------
+  [镜头 s4_05] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Zhang Ruochen's pale face, beads of cold sweat on his forehead. His eyes are downcast, looking exhausted.
+    - 对白: 
+    - 音效: 周围传来压抑的嘲笑声 (Muffled snickers from the surroundings)
+----------------------------------------
+  [镜头 s4_06] 时长: 5s
+    - 运镜: 中景，推近 (Medium shot, Zoom in)
+    - 画面: Zhang Ji steps forward from the crowd of young nobles. He points accusingly at Zhang Ruochen with a contemptuous expression.
+    - 对白: 张济：诸位都看到了！这就是我们王族的九王子，一个玷污王室颜面的废人！我提议，将他即刻驱逐出王族！ (Zhang Ji: Everyone sees! This is our Ninth Prince, a cripple who disgraces the royal family! I propose he be expelled immediately!)
+    - 音效: Zhang Ji's loud, clear voice. The background music stops. A few shouts of agreement.
+----------------------------------------
+  [镜头 s4_07] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Lin Ningshan stands beside Zhang Ji. Her beautiful face is cold and disdainful as she looks at Zhang Ruochen.
+    - 对白: 林泞姗：张济兄长所言极是。留此人在王族，徒增笑柄。 (Lin Ningshan: Brother Zhang Ji is absolutely right. Keeping him in the royal family only invites ridicule.)
+    - 音效: Lin Ningshan's cold, clear voice.
+----------------------------------------
+  [镜头 s4_08] 时长: 4s
+    - 运镜: 广角镜头，快速摇摄 (Wide shot, fast pan)
+    - 画面: The crowd of young nobles erupts in laughter and mocking shouts. They point at Zhang Ruochen.
+    - 对白: (哄笑声，讥讽声) (Laughter, mocking shouts)
+    - 音效: A wave of loud laughter and jeering.
+----------------------------------------
+  [镜头 s4_09] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: The King closes his eyes in pain but remains silent on his throne.
+    - 对白: 
+    - 音效: Laughter continues, but the King's silence is palpable.
+----------------------------------------
+  [镜头 s4_10] 时长: 6s
+    - 运镜: 中景，推近 (Medium shot, Zoom in)
+    - 画面: The Queen stands up gracefully. She raises a hand, and the crowd gradually falls silent.
+    - 对白: 王后：陛下仁慈，本宫亦非无情。这样吧，若尘儿，你若能接住同辈子弟三招而不倒，便可保留王子身份。如何？ (Queen: His Majesty is merciful, and I am not heartless either. Ruochen, if you can withstand three moves from your peers without falling, you may keep your prince status. What say you?)
+    - 音效: The Queen's voice is smooth but carries undeniable authority. The arena is silent.
+----------------------------------------
+  [镜头 s4_11] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Zhang Ruochen slowly lifts his head. His face is still pale, but his eyes briefly flicker with a deep, ancient light before returning to weakness.
+    - 对白: 张若尘：（虚弱地）儿臣...遵命。 (Zhang Ruochen: (Weakly) This son... obeys.)
+    - 音效: Zhang Ruochen's weak, breathy voice. A tense, suspenseful musical cue.
+----------------------------------------
+  [镜头 s4_12] 时长: 5s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: A burly young man with a fierce expression, Zhang Meng, jumps into the arena. He cracks his knuckles and grins savagely at Zhang Ruochen.
+    - 对白: 张猛：哈哈哈！九王子，就让我张猛来‘指点’你第一招吧！ (Zhang Meng: Hahaha! Ninth Prince, let me, Zhang Meng, 'instruct' you for the first move!)
+    - 音效: Zhang Meng's rough, loud laughter. Aggressive drumbeat in the music.
+----------------------------------------
+  [镜头 s4_13] 时长: 3s
+    - 运镜: 特写，慢动作推近 (Close-up, slow-motion Zoom in)
+    - 画面: Zhang Meng's right fist clenches tightly, muscles bulging. A faint yellow aura (Huangji Realm mid-stage) flickers around his fist.
+    - 对白: 
+    - 音效: A sharp intake of breath from the crowd. The sound of fist tightening. Intense, building music.
+----------------------------------------
+  [镜头 s4_14] 时长: 3s
+    - 运镜: 中景，快速推近 (Medium shot, fast Zoom in)
+    - 画面: Zhang Meng launches forward, his body a blur. His fist, surrounded by yellow light, shoots straight towards Zhang Ruochen's face with killing intent.
+    - 对白: 张猛：死吧！ (Zhang Meng: Die!)
+    - 音效: A fierce roar from Zhang Meng. The whooshing sound of a powerful punch. Music reaches a crescendo.
+----------------------------------------
+  [镜头 s4_15] 时长: 3s
+    - 运镜: 特写，极慢动作 (Close-up, extreme slow motion)
+    - 画面: The fist fills the screen, inches from Zhang Ruochen's nose. Zhang Ruochen's eyes suddenly focus with razor-sharp clarity.
+    - 对白: 
+    - 音效: Music and sound effects drop to near silence, only a high-pitched tension tone.
+----------------------------------------
+  [镜头 s4_16] 时长: 2s
+    - 运镜: 全身镜头，快速移动模糊 (Full-body shot, fast motion blur)
+    - 画面: In a flash of movement, Zhang Ruochen's feet execute a subtle, profound sidestep. His body seems to phase slightly, allowing the fist to pass by his cheek by a hair's breadth.
+    - 对白: 
+    - 音效: A sharp, swift 'whoosh' of movement. A subtle chime sound (hinting at profound technique).
+----------------------------------------
+  [镜头 s4_17] 时长: 2s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Zhang Ruochen's right hand forms a sword-finger posture. His fingers are straight and precise, aimed at Zhang Meng's extended wrist.
+    - 对白: 
+    - 音效: Silence.
+----------------------------------------
+  [镜头 s4_18] 时长: 2s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Zhang Ruochen's sword-fingers strike with pinpoint accuracy on a specific acupoint on Zhang Meng's wrist. A subtle shockwave distorts the air.
+    - 对白: 
+    - 音效: A crisp, clear 'tap' sound, like striking stone.
+----------------------------------------
+  [镜头 s4_19] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Meng's eyes widen in shock and pain. His fierce punch momentum completely dissipates. He lets out a blood-curdling scream and stumbles backward, clutching his now-limp right arm.
+    - 对白: 张猛：啊——！我的手臂！ (Zhang Meng: Aaaah—! My arm!)
+    - 音效: Zhang Meng's agonized scream. The sound of him stumbling back. The crowd's collective gasp.
+----------------------------------------
+  [镜头 s4_20] 时长: 5s
+    - 运镜: 广角镜头，缓慢摇摄 (Wide shot, slow pan)
+    - 画面: The entire martial arts arena is frozen in dead silence. Hundreds of young nobles, Zhang Ji, Lin Ningshan, all stare with eyes wide open, mouths agape, at the center of the arena.
+    - 对白: 
+    - 音效: Complete, absolute silence. Not a single sound.
+----------------------------------------
+  [镜头 s4_21] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ruochen stands exactly where he was. He lowers his sword-fingers slowly. His face is still pale, his breathing appears weak. He looks down at his own hand slightly puzzled, as if surprised by his own action.
+    - 对白: 
+    - 音效: Only the faint sound of wind and Zhang Ruochen's shallow breathing.
+----------------------------------------
+  [镜头 s4_22] 时长: 4s
+    - 运镜: 特写，推近 (Close-up, Zoom in)
+    - 画面: The Queen on the high platform. Her cold, calculating smile has vanished. Her eyes narrow dangerously, a flash of icy寒光 (cold light) and deep suspicion appearing in her pupils.
+    - 对白: 
+    - 音效: A single, deep, ominous cello note. The suspenseful hook music begins to build.
+----------------------------------------
+=================================================
+
+正在向 deepseek-chat 提交 ep_05 的分镜转化任务...
+✅ 成功生成 ep_05 的 25 条分镜指令。详细 Prompt 如下：
+
+====== [Media Agent: Storyboard Shots for ep_05] ======
+  [镜头 ep05_01] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: A furious Zhang Meng in a martial arts stance, his palms glowing with a faint yellow aura, in a palace hall. The crowd watches with bated breath.
+    - 对白: 张猛：开山掌第二式！
+    - 音效: 紧张急促的鼓点，人群低语声
+----------------------------------------
+  [镜头 ep05_02] 时长: 3s
+    - 运镜: 特写，推近 (Close-up, Zoom in)
+    - 画面: Extreme close-up of Zhang Meng's eyes, filled with rage and killing intent.
+    - 对白: 
+    - 音效: 掌风呼啸声增强
+----------------------------------------
+  [镜头 ep05_03] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ruochen stands calmly, a faint, almost invisible wisp of white energy swirls around his index finger.
+    - 对白: 
+    - 音效: 风声，鼓点暂停一瞬
+----------------------------------------
+  [镜头 ep05_04] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up of Zhang Ruochen's eyes, sharp and focused, analyzing the incoming attack.
+    - 对白: 
+    - 音效: 轻微的能量嗡鸣声
+----------------------------------------
+  [镜头 ep05_05] 时长: 4s
+    - 运镜: 慢动作特写，静态 (Slow-motion close-up, Static)
+    - 画面: Zhang Ruochen's finger thrusts forward with precise speed, piercing through the center of Zhang Meng's glowing palm aura.
+    - 对白: 
+    - 音效: 尖锐的破风声，随后是血肉被刺穿的闷响 '噗！'
+----------------------------------------
+  [镜头 ep05_06] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Blood spurts from a hole in Zhang Meng's palm. His expression shifts from rage to shock and pain.
+    - 对白: 张猛：啊！
+    - 音效: 痛苦的惨叫，血液滴落声
+----------------------------------------
+  [镜头 ep05_07] 时长: 4s
+    - 运镜: 全景，摇摄 (Wide shot, Pan Right)
+    - 画面: Zhang Meng collapses to the ground, clutching his injured hand. The entire hall erupts in gasps and murmurs.
+    - 对白: 
+    - 音效: 人群哗然，震惊的议论声四起
+----------------------------------------
+  [镜头 ep05_08] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ji's face is livid with anger, his fists clenched tightly at his sides.
+    - 对白: 
+    - 音效: 人群喧哗声持续，背景音乐转为阴沉
+----------------------------------------
+  [镜头 ep05_09] 时长: 3s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: The Queen stands up, her expression furious, about to speak.
+    - 对白: 王后：大胆！你...
+    - 音效: 威严而愤怒的女声
+----------------------------------------
+  [镜头 ep05_10] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: An elder in luxurious robes from the 'Martial Market Bank' raises a hand, interrupting the Queen. He looks at Zhang Ruochen with interest.
+    - 对白: 武市钱庄执事：且慢。
+    - 音效: 低沉而富有权威的男声，现场瞬间安静
+----------------------------------------
+  [镜头 ep05_11] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up of the elder's eyes, observing Zhang Ruochen thoughtfully.
+    - 对白: 武市钱庄执事：此子眼力与发力技巧，颇为精妙。
+    - 音效: 沉稳的语调，背景音乐转为带有算计意味的弦乐
+----------------------------------------
+  [镜头 ep05_12] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: The King steps forward, a calculating look in his eyes. He addresses the hall.
+    - 对白: 国王：既如此，寡人提议一场赌约。
+    - 音效: 国王威严的声音，略带一丝虚伪的缓和
+----------------------------------------
+  [镜头 ep05_13] 时长: 5s
+    - 运镜: 特写，推近 (Close-up, Zoom in)
+    - 画面: Close-up of the King's mouth as he speaks the terms of the bet.
+    - 对白: 国王：半月后王山狩猎，若张若尘成绩超过张济，则恢复一切。若不能，流放边荒。
+    - 音效: 清晰的宣告声，每个字都带着压力
+----------------------------------------
+  [镜头 ep05_14] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ruochen looks at the King, then at the expectant and hostile crowd. He slowly nods.
+    - 对白: 张若尘：...好。
+    - 音效: 简短而坚定的应答，沉重的呼吸声
+----------------------------------------
+  [镜头 ep05_15] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: As the crowd disperses, a faint, invisible pulse emanates from Zhang Ruochen's chest. His eyes widen slightly.
+    - 对白: 
+    - 音效: 微弱但奇异的时空嗡鸣声，人群嘈杂声渐远
+----------------------------------------
+  [镜头 ep05_16] 时长: 4s
+    - 运镜: 主观镜头，摇摄 (POV shot, Pan Left)
+    - 画面: Zhang Ruochen's POV, his gaze is irresistibly drawn to a distant, dimly lit stall in the Martial Market, focusing on a specific object.
+    - 对白: 
+    - 音效: 时空嗡鸣声增强，指向性音效
+----------------------------------------
+  [镜头 ep05_17] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Extreme close-up of a small, rusty bronze fragment on a cluttered stall table.
+    - 对白: 
+    - 音效: 嗡鸣声达到峰值，然后戛然而止
+----------------------------------------
+  [镜头 ep05_18] 时长: 4s
+    - 运镜: 夜景中景，跟踪 (Night scene medium shot, Tracking)
+    - 画面: Zhang Ruochen, dressed in dark clothes, moves stealthily through the empty, moonlit Martial Market streets towards the stall.
+    - 对白: 
+    - 音效: 轻微的脚步声，夜晚风声，悬疑的BGM
+----------------------------------------
+  [镜头 ep05_19] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Zhang Ruochen's hand reaches into the frame and picks up the bronze fragment from the stall.
+    - 对白: 
+    - 音效: 布料摩擦声，碎片被拿起的声音
+----------------------------------------
+  [镜头 ep05_20] 时长: 4s
+    - 运镜: 特写，推近 (Close-up, Zoom in)
+    - 画面: The moment the fragment touches his palm, a brilliant silver-blue light erupts from his chest (the时空印记) and envelops the fragment.
+    - 对白: 
+    - 音效: 强烈的能量共鸣声，光芒音效
+----------------------------------------
+  [镜头 ep05_21] 时长: 3s
+    - 运镜: 极端特写，静态 (Extreme close-up, Static)
+    - 画面: The rust on the bronze fragment rapidly flakes away, revealing intricate, ancient glowing patterns underneath.
+    - 对白: 
+    - 音效: 锈迹剥落的细微噼啪声，古老符文低鸣
+----------------------------------------
+  [镜头 ep05_22] 时长: 5s
+    - 运镜: 快速剪辑幻象，静态 (Quick-cut montage of visions, Static)
+    - 画面: 1. A vast, starry cosmos. 2. A colossal, crumbling celestial palace. 3. A close-up of an emperor's corpse on a throne, its face bearing a vague resemblance to Zhang Ruochen's past life.
+    - 对白: 
+    - 音效: 浩瀚的时空流动声，神殿崩塌的巨响，寂静的死亡气息，张若尘一声闷哼
+----------------------------------------
+  [镜头 ep05_23] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: Zhang Ruochen staggers back, clutching his head with one hand, the glowing fragment in the other. The visions fade.
+    - 对白: 张若尘：呃...！
+    - 音效: 痛苦的喘息声，光芒和幻象音效减弱
+----------------------------------------
+  [镜头 ep05_24] 时长: 4s
+    - 运镜: 低角度中景，静态 (Low-angle medium shot, Static)
+    - 画面: From the deep shadows of a nearby stall, a mysterious figure wearing a wide bamboo hat slowly raises his head.
+    - 对白: 
+    - 音效: 极轻微的衣物摩擦声，环境音几乎消失，悬疑BGM骤起
+----------------------------------------
+  [镜头 ep05_25] 时长: 5s
+    - 运镜: 特写，推近至眼睛 (Close-up, Zoom in on eyes)
+    - 画面: Extreme close-up of the mysterious figure's eyes under the hat, sharply focused on the glowing fragment in Zhang Ruochen's hand.
+    - 对白: 神秘人（画外音，低语）：时空传承的波动...终于出现了。
+    - 音效: 低沉、沙哑的男声低语，充满渴望与危险，BGM在最后一个字落下时戛然而止，留下悬念的寂静
+----------------------------------------
+=================================================
+
+
+[状态流转] 当前刚离开节点: agent4_storyboard
+ -> 当前系统阶段 (system_status): ready_for_storyboard
+--------------------------------------------------
+--- [Agent 5: Media Agent (AI Director - API/Browser Invocation)] ---
+正在构建 22 条 Prompt Array 进入并发请求池...
+🌐 连接到 [虚拟大模型底座 API (Kling / RunwayML)] ...
+>> 参数设置: { resolution: '1080p', aspect_ratio: '9:16', motion_bucket_id: 127 }
+>> 正在发起并发渲染，预计耗时取决于生成队列...
+>> [Error API Callback: RENDER_FAIL]
+❌ 拍摄崩溃。已驳回状态(director_rejected)，注入反馈信息。
+>> Router: 检测到退回请求，重新路由至 Agent 4
+
+[状态流转] 当前刚离开节点: agent5_director
+ -> 当前系统阶段 (system_status): blocked_on_ep_01_revision
+--------------------------------------------------
+!! 进入 Recovery 模式 (B计划), 处理反馈: 雨水与主体人脸混合生成故障，画面变成水墨模糊状。请删除复杂的环境交互。
+正在向 deepseek-chat 提交 ep_01 的分镜转化任务...
+✅ 成功生成 ep_01 的 24 条分镜指令。详细 Prompt 如下：
+
+====== [Media Agent: Storyboard Shots for ep_01] ======
+  [镜头 s1_01] 时长: 4s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: Extreme close-up of a young man's face, eyes tightly shut, sweat beading on his forehead, lying on a rough wooden floor.
+    - 对白: (内心独白) 我是...张若尘...
+    - 音效: 沉重的呼吸声，远处隐约的雷声
+----------------------------------------
+  [镜头 s1_02] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: Close-up of the same young man's eyes suddenly snapping open, pupils dilated with shock and pain.
+    - 对白: (内心独白) 池瑶...你为何...
+    - 音效: 心跳声骤然加剧，混杂着一声痛苦的低吟
+----------------------------------------
+  [镜头 s1_03] 时长: 3s
+    - 运镜: 中景, 静态 (Medium shot, Static)
+    - 画面: A man's boot stomping down on the wooden floor next to the young man's head, kicking up dust.
+    - 对白: 恶奴：废物王子，醒了？
+    - 音效: 靴子踩地的闷响，轻蔑的冷笑
+----------------------------------------
+  [镜头 s1_04] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: Close-up of the young man's hand clenching into a fist on the floor, knuckles white.
+    - 对白: 
+    - 音效: 拳头握紧的摩擦声，压抑的喘息
+----------------------------------------
+  [镜头 s1_05] 时长: 4s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: Close-up of the young man's face, looking up at an off-screen figure, expression filled with pain but eyes burning with defiance.
+    - 对白: 恶奴：王后娘娘有令，你这废物，该‘处理’掉了。
+    - 音效: 恶奴讥讽的语调，背景持续的沉重呼吸
+----------------------------------------
+  [镜头 s1_06] 时长: 4s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: Extreme close-up of the young man's eyes, focusing inward, a faint, ethereal light deep within the pupils.
+    - 对白: (内心独白) 经脉尽碎...气池枯竭...但这是...
+    - 音效: 所有环境音减弱，只留下一种空灵、微弱的嗡鸣声
+----------------------------------------
+  [镜头 s1_07] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: A shimmering, intricate symbol briefly overlays the young man's iris, glowing with a faint silver-blue light.
+    - 对白: (内心独白) 时空神武印记！
+    - 音效: 嗡鸣声略微增强，带着神秘的质感
+----------------------------------------
+  [镜头 s1_08] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: A rough wooden stick lying on the floor, next to the young man's hand.
+    - 对白: 
+    - 音效: 嗡鸣声戛然而止，回归沉重的呼吸和心跳
+----------------------------------------
+  [镜头 s1_09] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: Close-up of the young man's face, eyes narrowing with intense concentration, veins faintly visible on his temple.
+    - 对白: 
+    - 音效: 极度压抑的寂静
+----------------------------------------
+  [镜头 s1_10] 时长: 2s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: The air around the young man's hand seems to warp slightly, like heat haze, for a split second.
+    - 对白: 
+    - 音效: 一声极其短暂、高频的“铮”声
+----------------------------------------
+  [镜头 s1_11] 时长: 2s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: The young man's hand suddenly grabs the wooden stick.
+    - 对白: 
+    - 音效: 急促的布料摩擦声，木棍被抓起的刮擦声
+----------------------------------------
+  [镜头 s1_12] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: The sharpened end of the wooden stick thrusts downward out of frame.
+    - 对白: 恶奴：啊！我的脚！
+    - 音效: 木棍刺入肉体的闷响，紧接着是男人痛苦的惨叫
+----------------------------------------
+  [镜头 s1_13] 时长: 4s
+    - 运镜: 中景, 向右摇 (Medium shot, Pan Right)
+    - 画面: The young man's back as he scrambles to his feet and staggers towards a dark doorway, leaving the writhing figure of the servant behind.
+    - 对白: 
+    - 音效: 急促的脚步声，恶奴的咒骂和痛呼逐渐远去
+----------------------------------------
+  [镜头 s1_14] 时长: 4s
+    - 运镜: 主观视角, 晃动 (POV, Shaky)
+    - 画面: A shaky, blurred view of dark corridors and dusty shelves, as seen by the fleeing young man.
+    - 对白: (喘息声)
+    - 音效: 剧烈的心跳声，粗重的喘息，踉跄的脚步声
+----------------------------------------
+  [镜头 s1_15] 时长: 4s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: A dark, cramped corner between two towering bookshelves. A sliver of light from a high window illuminates swirling dust motes.
+    - 对白: 
+    - 音效: 喘息声逐渐平缓，转为压抑的咳嗽，环境极其安静
+----------------------------------------
+  [镜头 s1_16] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: The young man's hand, trembling slightly, presses against his abdomen, where dark stains are visible on his ragged clothes.
+    - 对白: (痛苦的吸气声)
+    - 音效: 衣服摩擦声，压抑的痛哼
+----------------------------------------
+  [镜头 s1_17] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: The young man's fingers, covered in dust and a trace of blood, brush against the floor.
+    - 对白: 
+    - 音效: 指尖划过灰尘的细微沙沙声
+----------------------------------------
+  [镜头 s1_18] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: The fingertips encounter the worn leather corner of a book buried under dust.
+    - 对白: 
+    - 音效: 触碰皮革的质感声，呼吸声屏住
+----------------------------------------
+  [镜头 s1_19] 时长: 5s
+    - 运镜: 特写, 缓慢推进 (Close-up, Slow Zoom in)
+    - 画面: The young man brushes away the thick dust, revealing faded, ancient characters on the book's cover: 《九天明帝经》.
+    - 对白: (内心独白，震惊) 这是...父亲的...
+    - 音效: 灰尘被拂开的沙沙声，呼吸变得急促而激动
+----------------------------------------
+  [镜头 s1_20] 时长: 4s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: Close-up of the young man's face in the dim light, eyes wide with a mixture of shock, hope, and lingering pain as he stares at the book.
+    - 对白: 
+    - 音效: 激动的心跳声
+----------------------------------------
+  [镜头 s1_21] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: The young man's hand hesitates for a moment, then firmly grips the ancient tome.
+    - 对白: 
+    - 音效: 手握住厚重书脊的摩擦声
+----------------------------------------
+  [镜头 s1_22] 时长: 3s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: Suddenly, the young man's head turns sharply, looking off-screen towards the entrance of the hiding place. His expression shifts from hope to alarm.
+    - 对白: 
+    - 音效: 所有声音瞬间消失，死一般的寂静
+----------------------------------------
+  [镜头 s1_23] 时长: 2s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: Extreme close-up of the young man's ear, tensed to listen.
+    - 对白: 王后 (画外音，冰冷而清晰)：搜！
+    - 音效: 一个冰冷、威严的女声从远处传来，带着回音
+----------------------------------------
+  [镜头 s1_24] 时长: 5s
+    - 运镜: 特写, 静态 (Close-up, Static)
+    - 画面: Close-up of the young man's eyes in the darkness, reflecting a sliver of light, filled with renewed determination and cold fury. He clutches the book tighter to his chest.
+    - 对白: 王后 (画外音)：活要见人，死要见尸。那个废物，必须永远闭嘴。
+    - 音效: 王后的声音继续，语气斩钉截铁。背景响起隐约的、由远及近的脚步声和盔甲摩擦声。画面定格，音乐骤停，只留悬念的余音。
+----------------------------------------
+=================================================
+
+
+[状态流转] 当前刚离开节点: agent4_storyboard
+ -> 当前系统阶段 (system_status): blocked_on_ep_01_revision
+--------------------------------------------------
+--- [Agent 5: Media Agent (AI Director - API/Browser Invocation)] ---
+正在构建 24 条 Prompt Array 进入并发请求池...
+🌐 连接到 [虚拟大模型底座 API (Kling / RunwayML)] ...
+>> 参数设置: { resolution: '1080p', aspect_ratio: '9:16', motion_bucket_id: 127 }
+>> 正在发起并发渲染，预计耗时取决于生成队列...
+>> [Success API Callback: RENDER_OK]
+✅ 拍摄大获成功。所有的视频片段都符合预期，正下载到本地高速缓存区！
+
+[状态流转] 当前刚离开节点: agent5_director
+ -> 当前系统阶段 (system_status): ep_01_generated
+--------------------------------------------------
+--- [Agent 6: Report Agent (Binding and Rendering)] ---
+正在读取 ep_01 的散装镜头并进行 Report Agent 对应的 FFMPEG 自动化物理 Binding (拼轨)...
+-> 自动执行音画同步 (Audio-Video Sync)
+   [FFmpeg] ffmpeg -i shot_01.mp4 -i audio_01.wav -c:v copy -c:a aac output_sync.mp4
+-> 结合大模型推断的 HTML/视频 Styles (特效、转场)
+   [FX_Layer] 植入转场 'Glitch' (帧级偏移) ...
+-> 根据多模态剧本渲染最终大字报字幕
+   [Overlay] 生成字幕轨: { font: 'PangMenZhengDao', size: 80, color: 'Yellow', edge: 'Black' }
+✅ ep_01 单集成片导出成功 (mp4)。
+
+[状态流转] 当前刚离开节点: agent6_editor
+ -> 当前系统阶段 (system_status): ep_01_ready_for_growth
+--------------------------------------------------
+--- [Agent 7: Report Agent (IR Scoring and Validation / Growth)] ---
+执行 IR(Information Retrieval) 校验与成片评分分析 ep_01 情绪高潮点...
+   [Model Vision] 分析发现本集含有极致的身份反转与情绪爆发。
+-> 自动执行长切片：导出 [高浓度剧情流·长视频A.mp4] (时长提取 ep_01 完整 1 分 15 秒黄金高能片段, 针对中长视频平台)
+-> 自动执行混剪：从 ep_01 提炼前中后三次打脸，导出 [极速爽感版素材B.mp4] (时长 45 秒, 针对极速版信息流)
+✅ 生成 2 版信息流广告视频。投递至虚拟大盘。
+
+[状态流转] 当前刚离开节点: agent7_growth
+ -> 当前系统阶段 (system_status): ep_01_publishing
+--------------------------------------------------
+--- [Agent 8: Insight Agent (Analytics / Database Mining)] ---
+正在连接 SQLite 数据库拉取各大平台投放消耗与转化核心指标...
+-> 本期数据 (消耗 CPA: ¥5.02, 有效完播率: 26.3%) 已挂载并写入 Data Lake 结构。
+-> 正在执行 SQL Query 进行数据洞察分析 (Chunked Analysis)...
+-> 发现: 数据库挖掘出炉！
+         - 最优标签系: ['女频', '古言', '重生', '复仇']
+         - 历史平均完播率: 0.30
+         => 策略路由: 下一次寻找同类竞品。
+✅ 市场偏好提取完毕。建议下期标签: ['女频', '古言', '重生', '复仇']
+
+[状态流转] 当前刚离开节点: agent8_analytics
+ -> 当前系统阶段 (system_status): cycle_completed_ready_for_next
+--------------------------------------------------
+
+==========✅ 最终系统状态 ✅==========

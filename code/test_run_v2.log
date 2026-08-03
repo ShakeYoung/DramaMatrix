@@ -1,0 +1,216 @@
+==========🚀 开始 DramaMatrix [全链路 8-Agent] 模拟流转 🚀==========
+--- [Agent 1: Query & Insight Agent (剧本嗅探者)] ---
+-> 正在查询本地 SQLite 数据库中尚未处理的小说...
+未在数据库找到合适数据，启动 Query Agent (Web Search) 爬虫抓取新小说...
+      [Scraper] Initializing BeautifulSoup Web Scraper...
+      [Scraper] Successfully scraped novel: 我在精神病院学斩神
+-> 选定小说: 《我在精神病院学斩神》, 标签: ['男频', '都市大能', '脑洞', '搞笑']
+
+[状态流转] 当前刚离开节点: agent1_scout
+ -> 当前系统阶段 (system_status): evaluating
+--------------------------------------------------
+--- [Agent 2: Agent Forum & Insight Agent (爆点评估师)] ---
+正在开始对《我在精神病院学斩神》进行分块分析 (Chunked Analysis) 并准备立项...
+      [Agent Forum] 正在注入先验知识 (Knowledge Injection / RAG)...
+      [Agent Forum] 评论家与受众正在展开辩论 (Unfold a debate)...
+✅ 剧本评估通过。爽度评分: 72
+   Forum 共识: 【爽点分析】1. 核心悬念强：开篇即抛出‘在精神病院学斩神’的颠覆性设定与‘看到神明’的疯狂宣言，信息差巨大（被认定的疯子 vs 可能掌握真相的觉醒者），符合‘黄金前三章必须包含核心悬念’原则。2. 情绪基点明确：主角身穿拘束服处于‘被逼至绝境’的弱势地位，为后续‘亮出底牌’（斩神能力）和‘反杀全场’（证明自己、颠覆认知）提供了极佳的情绪拉升起点。3. 代入感与冲突前置：‘被全世界误解的孤独先知’设定极易引发下沉市场共鸣，渴望后续打脸。
+【反噬点与逻辑硬伤】1. 节奏风险：开篇仅有对话与状态描写，若后续三章内不迅速展开‘斩神’能力展示或第一个小规模反转（如：证明神明存在、逃离病院），极易被判定为节奏拖沓。2. 设定解释负担：‘看到神明’的模糊表述若没有快速、具象化的补充（如：神明的形态、为何要斩），世界观逻辑将显得空洞，沦为纯粹噱头。3. 主角能动性不足：开篇主角完全被动（穿着拘束服，向医生辩解），若不在短时间内转变为主动行动或秘密成长，将严重削弱爽感。
+【妥协裁决】作品在‘悬念设置’和‘情绪基点’上精准命中爆款公式，具备强烈的商业潜力。但必须严格限定：在第三章结束前，必须完成一次小规模‘证明/反转’事件（如：以某种方式向医生或观众初步展示能力，或揭示病院背后的秘密），并将‘学斩神’的‘学’字落到实处（如：在病院内发现异常、开始秘密训练或获得第一个导师/金手指）。否则，前期积累的悬念将迅速转化为‘故弄玄虚’的负面评价。
+
+[状态流转] 当前刚离开节点: agent2_hook_analyzer
+ -> 当前系统阶段 (system_status): script_drafting
+--------------------------------------------------
+--- [Agent 3: Report Agent (主编剧)] ---
+开始对《我在精神病院学斩神》进行时间线分析 (Timeline Analysis) 与剧本拆解 (Chunked Reflection)...
+
+
+====== [Report Agent: Master Script Outline] ======
+天才少年林七夜因能看见‘神明’而被送入精神病院，在非正常人类研究中心，他逐渐发现这里并非治疗场所，而是囚禁、研究甚至抹杀‘异常者’的牢笼。他必须伪装、隐忍，在绝境中学习掌控自身能力，揭开‘神明’与‘异常’的真相，并最终向那些将他视为实验品的势力发起复仇，打碎这座囚笼。
+===================================================
+
+      [Report Agent] 大模型调用失败或无API key: 2 validation errors for EpisodeState
+status
+  Input should be 'pending_script', 'script_done', 'storyboard_done', 'director_rejected', 'video_generated', 'edit_completed' or 'growth_ready' [type=literal_error, input_value='script_ready', input_type=str]
+    For further information visit https://errors.pydantic.dev/2.12/v/literal_error
+script_data
+  Input should be a valid dictionary or instance of EpisodeScriptData [type=model_type, input_value=TimelineEpisode(ep_id='ep...愤怒的眼睛上。'), input_type=TimelineEpisode]
+    For further information visit https://errors.pydantic.dev/2.12/v/model_type
+      使用内置回退方案生成主梗概和时间线...
+✅ 使用内建兜底方案生成了全剧拆解与前两集大纲。
+
+[状态流转] 当前刚离开节点: agent3_head_writer
+ -> 当前系统阶段 (system_status): ready_for_storyboard
+--------------------------------------------------
+--- [Agent 4: Media Agent (Storyboard & Modal Cards)] ---
+正在向 deepseek-chat 提交分镜转化任务...
+✅ 成功生成 8 条分镜指令。详细 Prompt 如下：
+
+====== [Media Agent: Storyboard Shots] ======
+  [镜头 s1_01] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: A young woman stands alone on a rainy city street at night. She is soaked, her hair and clothes clinging to her. Streetlights reflect on the wet asphalt. She looks heartbroken, staring into the distance.
+    - 对白: (无声，只有雨声)
+    - 音效: 持续的雨声，远处模糊的城市交通声，悲伤的钢琴旋律 (Continuous rain, distant city traffic, sad piano melody)
+----------------------------------------
+  [镜头 s1_02] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on the woman's face. Raindrops mix with tears on her cheeks. Her eyes are red and filled with despair. She slowly closes her eyes.
+    - 对白: (抽泣声)
+    - 音效: 雨声，轻微的抽泣声，悲伤的钢琴旋律增强 (Rain, soft sobbing, sad piano melody intensifies)
+----------------------------------------
+  [镜头 s1_03] 时长: 4s
+    - 运镜: 中景，向左摇摄 (Medium shot, Pan Left)
+    - 画面: The woman turns her head as a sleek, black luxury sedan with tinted windows pulls up smoothly to the curb beside her. The car's headlights cut through the rain.
+    - 对白: (汽车停下的声音)
+    - 音效: 雨声，汽车引擎低沉的轰鸣声接近并停止，钢琴旋律转为悬疑 (Rain, low purr of a car engine approaching and stopping, piano melody shifts to suspenseful)
+----------------------------------------
+  [镜头 s1_04] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Close-up on the woman's face showing confusion and a flicker of hope. She looks at the car's passenger window.
+    - 对白: 谁...？
+    - 音效: 雨声，悬疑的弦乐铺垫 (Rain, suspenseful string铺垫)
+----------------------------------------
+  [镜头 s1_05] 时长: 4s
+    - 运镜: 特写，缓慢推近 (Close-up, Slow Zoom in)
+    - 画面: Close-up on the rear passenger window of the black car. The darkly tinted window begins to roll down smoothly.
+    - 对白: (车窗降下的电机声)
+    - 音效: 雨声，车窗电机低沉的嗡嗡声，悬疑音乐节奏加快 (Rain, low hum of window motor, suspenseful music tempo increases)
+----------------------------------------
+  [镜头 s1_06] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: The window is halfway down, revealing the silhouette of a man inside the car. The interior light is dim. The man's face is partially shadowed but recognizable.
+    - 对白: 
+    - 音效: 雨声，音乐戛然而止，只留下紧张的氛围音 (Rain, music cuts abruptly, leaving only tense ambient sound)
+----------------------------------------
+  [镜头 s1_07] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: Extreme close-up on the woman's eyes widening in shock and disbelief. Her mouth slightly opens.
+    - 对白: 是你？！
+    - 音效: 雨声，一声轻微的、震惊的吸气声 (Rain, a soft, shocked gasp)
+----------------------------------------
+  [镜头 s1_08] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: The man inside the car smiles faintly, a confident and slightly predatory smile. The light catches his familiar features clearly – he is the male lead's business rival and nemesis.
+    - 对白: 上车。
+    - 音效: 雨声，男人低沉而带有命令口吻的声音，悬疑音乐主题重新响起，低沉而有力 (Rain, the man's low, commanding voice, the suspenseful music theme returns, low and powerful)
+----------------------------------------
+=================================================
+
+
+[状态流转] 当前刚离开节点: agent4_storyboard
+ -> 当前系统阶段 (system_status): ready_for_storyboard
+--------------------------------------------------
+--- [Agent 5: Media Agent (AI Director - API/Browser Invocation)] ---
+正在调起虚拟视频底座 API，准备生成 8 个镜头...
+>> [Error API Callback: RENDER_FAIL]
+❌ 拍摄崩溃。已驳回状态(director_rejected)，注入反馈信息。
+>> Router: 检测到退回请求，重新路由至 Agent 4
+
+[状态流转] 当前刚离开节点: agent5_director
+ -> 当前系统阶段 (system_status): blocked_on_ep_01_revision
+--------------------------------------------------
+--- [Agent 4: Media Agent (Storyboard & Modal Cards)] ---
+!! 进入 Recovery 模式 (B计划), 处理反馈: 雨水与主体人脸混合生成故障，画面变成水墨模糊状。请删除复杂的环境交互。
+正在向 deepseek-chat 提交分镜转化任务...
+✅ 成功生成 9 条分镜指令。详细 Prompt 如下：
+
+====== [Media Agent: Storyboard Shots] ======
+  [镜头 s1_01] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: A woman's face in close-up, drenched, raindrops running down her cheeks, looking directly at the camera with despair, shallow depth of field, cinematic lighting.
+    - 对白: (无声哭泣)
+    - 音效: 沉重的钢琴独奏，持续的雨声
+----------------------------------------
+  [镜头 s1_02] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: A man's hand letting go of another hand, fingers slipping apart, shallow depth of field, rain on the hands.
+    - 对白: 我们结束了。
+    - 音效: 雨声，手松开的声音，沉重的钢琴音符
+----------------------------------------
+  [镜头 s1_03] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: The woman's eyes, wide open, tears mixing with raindrops, looking at something off-camera, shallow depth of field.
+    - 对白: 
+    - 音效: 雨声，远处汽车引擎启动声，悲伤的弦乐
+----------------------------------------
+  [镜头 s1_04] 时长: 4s
+    - 运镜: 中景，静态 (Medium shot, Static)
+    - 画面: The woman's back, slumped on the wet ground in the rain, shallow depth of field, cinematic lighting.
+    - 对白: 
+    - 音效: 雨声，悲伤的弦乐渐强
+----------------------------------------
+  [镜头 s1_05] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: A luxury car tire stopping in a puddle, splashing water, shallow depth of field, rain.
+    - 对白: (刹车声)
+    - 音效: 雨声，清晰的汽车刹车声，音乐暂停
+----------------------------------------
+  [镜头 s1_06] 时长: 3s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: A car door opening from the inside, a man's hand in a suit sleeve reaching out, shallow depth of field.
+    - 对白: 上车。
+    - 音效: 雨声，车门打开声，低沉神秘的BGM引入
+----------------------------------------
+  [镜头 s1_07] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: The woman's face looking up from the ground, confusion and a flicker of hope in her eyes, raindrops on her face, shallow depth of field.
+    - 对白: 
+    - 音效: 雨声，神秘悬疑的BGM
+----------------------------------------
+  [镜头 s1_08] 时长: 5s
+    - 运镜: 特写，推近 (Close-up, Zoom in)
+    - 画面: The tinted window of the luxury car, rain drops sliding down the glass, the window begins to roll down slowly, shallow depth of field.
+    - 对白: 
+    - 音效: 雨声，电动窗户下降的轻微电机声，悬疑BGM节奏加快
+----------------------------------------
+  [镜头 s1_09] 时长: 4s
+    - 运镜: 特写，静态 (Close-up, Static)
+    - 画面: A man's face is partially revealed behind the descending car window, a familiar yet antagonistic smirk, shallow depth of field, dramatic side lighting.
+    - 对白: 
+    - 音效: 雨声，悬疑BGM达到一个高潮音符后戛然而止
+----------------------------------------
+=================================================
+
+
+[状态流转] 当前刚离开节点: agent4_storyboard
+ -> 当前系统阶段 (system_status): blocked_on_ep_01_revision
+--------------------------------------------------
+--- [Agent 5: Media Agent (AI Director - API/Browser Invocation)] ---
+正在调起虚拟视频底座 API，准备生成 9 个镜头...
+✅ 拍摄大获成功。所有的视频片段都符合预期！
+
+[状态流转] 当前刚离开节点: agent5_director
+ -> 当前系统阶段 (system_status): ep_01_generated
+--------------------------------------------------
+--- [Agent 6: Report Agent (Binding and Rendering)] ---
+正在读取 ep_01 的散装镜头并进行 Report Agent 对应的 FFMPEG 自动化物理 Binding (拼轨)...
+-> 自动执行音画同步 (Audio-Video Sync)
+-> 结合大模型推断的 HTML/视频 Styles (特效、转场)
+-> 根据多模态剧本渲染最终大字报字幕
+✅ ep_01 单集成片导出成功 (mp4)。
+
+[状态流转] 当前刚离开节点: agent6_editor
+ -> 当前系统阶段 (system_status): ep_01_ready_for_growth
+--------------------------------------------------
+--- [Agent 7: Report Agent (IR Scoring and Validation / Growth)] ---
+执行 IR(Information Retrieval) 校验与成片评分分析 ep_01 情绪高潮点...
+-> 通过视觉理解切分第2帧至第10帧为 [悬疑反转版素材A]
+-> 切分第15帧至第22帧为 [强情绪发泄版素材B]
+✅ 生成 2 版信息流广告视频。投递至虚拟大盘。
+
+[状态流转] 当前刚离开节点: agent7_growth
+ -> 当前系统阶段 (system_status): ep_01_publishing
+--------------------------------------------------
+--- [Agent 8: Insight Agent (Analytics / Database Mining)] ---
+正在连接 SQLite 数据库拉取各大平台投放消耗与转化核心指标...
+-> 本期数据 (CPA: 12.10, 完播率: 0.30) 已入库。
+-> 正在执行 SQL Query 进行数据洞察分析 (Chunked Analysis)...
+-> 发现: 数据库挖掘显示 ['女频', '古言', '重生', '复仇'] 完播率表现最优 (0.28)。
+✅ 市场偏好提取完毕。建议下期标签: ['女频', '古言', '重生', '复仇']
+
+[状态流转] 当前刚离开节点: agent8_analytics
+ -> 当前系统阶段 (system_status): cycle_completed_ready_for_next
+--------------------------------------------------
+
+==========✅ 最终系统状态 ✅==========
