@@ -30,22 +30,12 @@ fi
 source "$(conda info --base)/etc/profile.d/conda.sh"
 conda activate "$CONDA_ENV_NAME"
 
-DRAMAMATRIX_PROXY_URL="${DRAMAMATRIX_PROXY_URL:-http://127.0.0.1:7890}"
-export HTTP_PROXY="$DRAMAMATRIX_PROXY_URL"
-export HTTPS_PROXY="$DRAMAMATRIX_PROXY_URL"
-export ALL_PROXY="$DRAMAMATRIX_PROXY_URL"
-export http_proxy="$DRAMAMATRIX_PROXY_URL"
-export https_proxy="$DRAMAMATRIX_PROXY_URL"
-export all_proxy="$DRAMAMATRIX_PROXY_URL"
-export NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,::1}"
-export no_proxy="${no_proxy:-localhost,127.0.0.1,::1}"
-
 echo "=========================================================="
 echo "Starting DramaMatrix"
 echo "Job ID: ${SLURM_JOB_ID:-local}"
 echo "Node: ${SLURMD_NODENAME:-local}"
 echo "Conda environment: $CONDA_ENV_NAME"
-echo "Proxy: $DRAMAMATRIX_PROXY_URL"
+echo "Proxy: configured by code/.env or DRAMAMATRIX_PROXY_URL"
 echo "Date: $(date)"
 echo "=========================================================="
 

@@ -2,6 +2,7 @@ import os
 import unittest
 from unittest.mock import patch
 
+from src.network import configure_proxy_environment
 from src.runtime_options import apply_runtime_options, parse_runtime_options
 
 
@@ -27,6 +28,30 @@ class RuntimeOptionsTests(unittest.TestCase):
         with patch.dict(os.environ, {}, clear=True):
             apply_runtime_options(options)
             self.assertEqual(os.environ["DRAMAMATRIX_RESUME"], "0")
+
+    def test_direct_mode_clears_inherited_proxy_variables(self):
+        with patch.dict(
+            os.environ,
+            {
+                "DRAMAMATRIX_PROXY_URL": "direct",
+                "HTTPS_PROXY": "http://127.0.0.1:7890",
+                "https_proxy": "http://127.0.0.1:7890",
+            },
+            clear=True,
+        ):
+            configure_proxy_environment()
+            self.assertNotIn("HTTPS_PROXY", os.environ)
+            self.assertNotIn("https_proxy", os.environ)
+
+    def test_unavailable_proxy_falls_back_to_direct_connection(self):
+        with patch.dict(
+            os.environ,
+            {"DRAMAMATRIX_PROXY_URL": "http://127.0.0.1:7890"},
+            clear=True,
+        ), patch("src.network.socket.create_connection", side_effect=OSError("Connection refused")):
+            configure_proxy_environment()
+            self.assertNotIn("HTTP_PROXY", os.environ)
+            self.assertNotIn("HTTPS_PROXY", os.environ)
 
 
 if __name__ == "__main__":

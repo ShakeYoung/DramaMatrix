@@ -2,22 +2,13 @@ import os
 from dotenv import load_dotenv
 from src.db import db_get_project_state_snapshot, db_save_project_state
 from src.graph import build_drama_matrix_graph
+from src.network import configure_proxy_environment
 from src.project_state import new_project_state, restore_project_state
 from src.runtime_options import apply_runtime_options, parse_runtime_options
 from src.text_model import has_text_model_credentials
 
 # 加载环境变量（文本模型和 Agnes 视频模型共用该配置文件）
 load_dotenv()
-
-
-def configure_proxy_environment():
-    proxy_url = os.getenv("DRAMAMATRIX_PROXY_URL", "").strip()
-    if not proxy_url or proxy_url.lower() in {"direct", "none", "off"}:
-        return
-    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
-        os.environ[name] = proxy_url
-    os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
-    os.environ.setdefault("no_proxy", "localhost,127.0.0.1,::1")
 
 
 def main(argv=None):

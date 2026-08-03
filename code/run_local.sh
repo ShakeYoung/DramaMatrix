@@ -7,16 +7,6 @@ set -euo pipefail
 
 PROJECT_ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 CONDA_ENV_NAME="${DRAMAMATRIX_CONDA_ENV:-dramamatrix}"
-DRAMAMATRIX_PROXY_URL="${DRAMAMATRIX_PROXY_URL:-http://127.0.0.1:7890}"
-
-export HTTP_PROXY="$DRAMAMATRIX_PROXY_URL"
-export HTTPS_PROXY="$DRAMAMATRIX_PROXY_URL"
-export ALL_PROXY="$DRAMAMATRIX_PROXY_URL"
-export http_proxy="$DRAMAMATRIX_PROXY_URL"
-export https_proxy="$DRAMAMATRIX_PROXY_URL"
-export all_proxy="$DRAMAMATRIX_PROXY_URL"
-export NO_PROXY="${NO_PROXY:-localhost,127.0.0.1,::1}"
-export no_proxy="${no_proxy:-localhost,127.0.0.1,::1}"
 
 cd "$PROJECT_ROOT"
 mkdir -p logs
@@ -30,7 +20,7 @@ echo "=========================================================="
 echo "Starting DramaMatrix"
 echo "Launcher: local"
 echo "Conda environment: ${CONDA_DEFAULT_ENV:-not activated}"
-echo "Proxy: $DRAMAMATRIX_PROXY_URL"
+echo "Proxy: configured by code/.env or DRAMAMATRIX_PROXY_URL"
 echo "Date: $(date)"
 echo "=========================================================="
 
