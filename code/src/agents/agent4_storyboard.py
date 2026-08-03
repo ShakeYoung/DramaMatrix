@@ -1,10 +1,7 @@
-import os
-from pprint import pprint
 from typing import List
 from pydantic import BaseModel, Field
+from src.text_model import TextModelSettings, create_text_model
 
-# Using standard ChatOpenAI
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from src.state import DramaState, EpisodeState, ShotStoryboard
@@ -44,7 +41,7 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
         print("没有找到需要分镜转化的剧集。")
         return state
         
-    model_name = os.getenv("OPENAI_MODEL", "gpt-4o")
+    model_name = TextModelSettings.from_environment().model
     parser = PydanticOutputParser(pydantic_object=StoryboardOutput)
     
     for ep_key in target_eps:
@@ -67,7 +64,7 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
         
         print(f"正在向 {model_name} 提交 {ep_key} 的分镜转化任务...")
         try:
-            llm = ChatOpenAI(model=model_name, temperature=0.7)
+            llm = create_text_model(temperature=0.7)
             chain = prompt | llm | parser
             result: StoryboardOutput = chain.invoke({
                 "ep_id": ep_key,

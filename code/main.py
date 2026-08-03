@@ -2,16 +2,17 @@ import os
 from dotenv import load_dotenv
 from src.db import db_save_project_state
 from src.graph import build_drama_matrix_graph
+from src.text_model import has_text_model_credentials
 
-# 加载环境变量 (读取 .env 获取 OPENAI_API_KEY)
+# 加载环境变量（文本模型和 Agnes 视频模型共用该配置文件）
 load_dotenv()
 
 def main():
     if not os.getenv("AGNES_API_KEY"):
         print("⚠️ 未检测到 AGNES_API_KEY。请在 .env 中配置后再运行真实视频生产流程。")
         return
-    if not os.getenv("OPENAI_API_KEY"):
-        print("⚠️ 未检测到 OPENAI_API_KEY；Agent 2–4 将使用其现有的回退逻辑。")
+    if not has_text_model_credentials():
+        print("⚠️ 未检测到文本模型密钥；Agent 2–4 将使用其现有的回退逻辑。")
         
     app = build_drama_matrix_graph()
     

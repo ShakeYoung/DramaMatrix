@@ -1,10 +1,8 @@
 # /Users/yangkang/Library/CloudStorage/OneDrive-共享的库-onedrive/own_project/DramaMatrix/code/src/agents/agent2_hook_analyzer.py
-import os
 from pydantic import BaseModel, Field
 from src.state import DramaState, EvaluationReport
+from src.text_model import TextModelSettings, create_text_model
 
-# Simulated LangChain / LLM models
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
@@ -36,10 +34,10 @@ def debate_in_agent_forum(novel_title: str, novel_content: str) -> ForumVerdict:
     print("      [Agent Forum] 正在注入先验知识 (Knowledge Injection / RAG)...")
     prior_knowledge = load_prior_knowledge()
     
-    model_name = os.getenv("OPENAI_MODEL", "gpt-4o")
-    # Using a dummy model for demonstration or rely on LLM if API key is set
+    model_name = TextModelSettings.from_environment().model
+    # Use either OpenAI or an OpenAI-compatible provider configured in .env.
     try:
-        llm = ChatOpenAI(model=model_name, temperature=0.7)
+        llm = create_text_model(temperature=0.7)
         parser = PydanticOutputParser(pydantic_object=ForumVerdict)
         
         system_prompt = f"""你是一个短剧内容评委会（Agent Forum）。

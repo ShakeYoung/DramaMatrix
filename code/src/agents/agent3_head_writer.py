@@ -1,11 +1,9 @@
 # /Users/yangkang/Library/CloudStorage/OneDrive-共享的库-onedrive/own_project/DramaMatrix/code/src/agents/agent3_head_writer.py
-import os
 from pydantic import BaseModel, Field
 from typing import List
 from src.state import DramaState, EpisodeState, EpisodeScriptData
+from src.text_model import TextModelSettings, create_text_model
 
-# Using standard ChatOpenAI
-from langchain_openai import ChatOpenAI
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
@@ -37,7 +35,7 @@ def process_agent3_head_writer(state: DramaState) -> DramaState:
     
     print(f"开始对《{source_title}》进行时间线分析 (Timeline Analysis) 与剧本拆解 (Chunked Reflection)...")
     
-    model_name = os.getenv("OPENAI_MODEL", "gpt-4o")
+    model_name = TextModelSettings.from_environment().model
     
     
     parser = PydanticOutputParser(pydantic_object=MasterScriptReport)
@@ -53,7 +51,7 @@ def process_agent3_head_writer(state: DramaState) -> DramaState:
     human_prompt = f"项目名称：《{source_title}》\n来源文本：\n{raw_text[:2000]}"
 
     try:
-        llm = ChatOpenAI(model=model_name, temperature=0.7)
+        llm = create_text_model(temperature=0.7)
         
         response = llm.invoke([
             SystemMessage(content=system_prompt),
