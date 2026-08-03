@@ -18,6 +18,7 @@ htmlcov/
 code/outputs/
 code/logs/
 logs/
+backups/
 *.log
 *.db
 *.sqlite

@@ -9,7 +9,19 @@ from src.text_model import has_text_model_credentials
 # 加载环境变量（文本模型和 Agnes 视频模型共用该配置文件）
 load_dotenv()
 
+
+def configure_proxy_environment():
+    proxy_url = os.getenv("DRAMAMATRIX_PROXY_URL", "").strip()
+    if not proxy_url or proxy_url.lower() in {"direct", "none", "off"}:
+        return
+    for name in ("HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "http_proxy", "https_proxy", "all_proxy"):
+        os.environ[name] = proxy_url
+    os.environ.setdefault("NO_PROXY", "localhost,127.0.0.1,::1")
+    os.environ.setdefault("no_proxy", "localhost,127.0.0.1,::1")
+
+
 def main(argv=None):
+    configure_proxy_environment()
     apply_runtime_options(parse_runtime_options(argv))
     if not os.getenv("AGNES_API_KEY"):
         print("⚠️ 未检测到 AGNES_API_KEY。请在 .env 中配置后再运行真实视频生产流程。")

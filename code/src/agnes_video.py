@@ -35,6 +35,10 @@ class AgnesTaskFailed(AgnesVideoError):
     """The remote video task reached the failed terminal state."""
 
 
+class AgnesContentPolicyViolation(AgnesVideoError):
+    """Agnes rejected the prompt or existing task for content policy reasons."""
+
+
 def _int_env(name: str, default: int) -> int:
     value = os.getenv(name)
     return default if value in (None, "") else int(value)
@@ -151,6 +155,10 @@ class AgnesVideoClient:
                 break
             except HTTPError as exc:
                 detail = exc.read().decode("utf-8", errors="replace")[:600]
+                if "content_policy_violation" in detail:
+                    raise AgnesContentPolicyViolation(
+                        f"Agnes API HTTP {exc.code}: {detail}"
+                    ) from exc
                 raise AgnesVideoError(f"Agnes API HTTP {exc.code}: {detail}") from exc
             except (URLError, TimeoutError, ssl.SSLError, OSError) as exc:
                 if attempt < retry_count:

@@ -2,10 +2,12 @@ import json
 import tempfile
 import unittest
 from unittest.mock import patch
-from urllib.error import URLError
+from io import BytesIO
+from urllib.error import HTTPError, URLError
 
 from src.agnes_video import (
     AgnesConfigurationError,
+    AgnesContentPolicyViolation,
     AgnesTaskFailed,
     AgnesVideoClient,
     AgnesVideoSettings,
@@ -103,6 +105,20 @@ class AgnesVideoClientTests(unittest.TestCase):
             result = client.get_task("task_123")
         self.assertEqual(result["status"], "queued")
         self.assertEqual(mocked_open.call_count, 2)
+
+    def test_content_policy_http_error_is_typed(self):
+        client = AgnesVideoClient(self.settings)
+        error_body = b'{"error":{"code":"content_policy_violation","message":"blocked"}}'
+        http_error = HTTPError(
+            "https://apihub.agnes-ai.com/v1/videos/task_123",
+            400,
+            "Bad Request",
+            {},
+            BytesIO(error_body),
+        )
+        with patch("src.agnes_video.urlopen", side_effect=http_error):
+            with self.assertRaises(AgnesContentPolicyViolation):
+                client.get_task("task_123")
 
     def test_download_retries_network_eof(self):
         client = AgnesVideoClient(self.settings)

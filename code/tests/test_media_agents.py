@@ -6,8 +6,8 @@ from unittest.mock import MagicMock, patch
 from src.agents.agent5_director import process_agent5_director
 from src.agents.agent6_editor import process_agent6_editor
 from src.agents.agent7_growth import process_agent7_growth
-from src.agnes_video import AgnesVideoError, AgnesVideoSettings
-from src.state import EpisodeScriptData, EpisodeState, ShotStoryboard
+from src.agnes_video import AgnesContentPolicyViolation, AgnesVideoError, AgnesVideoSettings
+from src.state import EpisodeScriptData, EpisodeState, GeneratedVideoAsset, ShotStoryboard
 
 
 def make_state():
@@ -123,6 +123,34 @@ class MediaAgentTests(unittest.TestCase):
         self.assertFalse(resumed_client.create_video.called)
         resumed_client.wait_for_video.assert_called_once_with("video_1", "task_1")
         self.assertEqual(episode.status, "video_generated")
+
+    def test_content_policy_violation_routes_to_storyboard_revision(self):
+        state = make_state()
+        episode = state["episodes"]["ep_01"]
+        episode.status = "render_pending"
+        episode.video_assets = [
+            GeneratedVideoAsset(
+                shot_id="s01",
+                video_id="video_1",
+                task_id="task_1",
+                status="submitted",
+                prompt="blocked prompt",
+            )
+        ]
+        settings = AgnesVideoSettings(api_key="test-key", max_shots_per_episode=1)
+        client = MagicMock()
+        client.wait_for_video.side_effect = AgnesContentPolicyViolation(
+            "Agnes API HTTP 400: content_policy_violation"
+        )
+
+        with patch("src.agents.agent5_director.AgnesVideoSettings.from_environment", return_value=settings), patch(
+            "src.agents.agent5_director.AgnesVideoClient", return_value=client
+        ), patch("src.agents.agent5_director.db_save_project_state"):
+            process_agent5_director(state)
+
+        self.assertEqual(episode.status, "director_rejected")
+        self.assertEqual(state["system_status"], "blocked_on_storyboard_revision")
+        self.assertIn("内容策略拒绝", episode.feedback_log[-1].message)
 
 
 if __name__ == "__main__":

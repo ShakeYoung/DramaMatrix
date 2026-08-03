@@ -6,6 +6,7 @@ from pathlib import Path
 
 from src.agnes_video import (
     AgnesConfigurationError,
+    AgnesContentPolicyViolation,
     AgnesTaskFailed,
     AgnesVideoClient,
     AgnesVideoError,
@@ -136,6 +137,14 @@ def _render_episode(
             asset.status = "completed"
             asset.local_path = str(local_path)
             _checkpoint(state, ep_key, ep_state)
+        except AgnesContentPolicyViolation as exc:
+            _reject_episode(
+                ep_key,
+                ep_state,
+                f"镜头 {shot.shot_id} 的 Agnes 内容策略拒绝：{exc}",
+            )
+            _checkpoint(state, ep_key, ep_state)
+            return
         except AgnesTaskFailed as exc:
             _reject_episode(ep_key, ep_state, f"镜头 {shot.shot_id} 的 Agnes 任务失败：{exc}")
             _checkpoint(state, ep_key, ep_state)
@@ -159,7 +168,7 @@ def process_agent5_director(state: DramaState) -> DramaState:
     targets = [
         (key, ep)
         for key, ep in state["episodes"].items()
-        if ep.status in {"storyboard_done", "rendering", "render_pending"}
+        if ep.status in {"storyboard_done", "rendering", "render_pending", "render_failed"}
     ]
     if not targets:
         print("没有等待 Agnes 渲染的剧集。")
@@ -179,6 +188,8 @@ def process_agent5_director(state: DramaState) -> DramaState:
     for ep_key, ep_state in targets:
         _render_episode(state, ep_key, ep_state, client, settings)
         state["episodes"][ep_key] = ep_state
+        if ep_state.status == "director_rejected":
+            break
         if ep_state.status == "render_pending":
             # Do not submit later episodes while the proxy is unstable.
             break

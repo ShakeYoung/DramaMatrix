@@ -23,7 +23,7 @@ def route_from_start(state: DramaState) -> str:
     if episodes:
         if any(ep.status in {"script_done", "director_rejected"} for ep in episodes):
             return "agent4_storyboard"
-        if any(ep.status in {"storyboard_done", "rendering", "render_pending"} for ep in episodes):
+        if any(ep.status in {"storyboard_done", "rendering", "render_pending", "render_failed"} for ep in episodes):
             return "agent5_director"
         if any(ep.status == "video_generated" for ep in episodes):
             return "agent6_editor"
@@ -54,6 +54,8 @@ def route_next_step_for_episode(state: DramaState) -> str:
     if any(ep.status == "render_pending" for ep in episodes):
         return END
     if any(ep.status == "storyboard_done" for ep in episodes):
+        return "agent5_director"
+    if any(ep.status == "render_failed" for ep in episodes):
         return "agent5_director"
     if any(ep.status == "video_generated" for ep in episodes):
         return "agent6_editor"
