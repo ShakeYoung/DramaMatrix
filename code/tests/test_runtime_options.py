@@ -14,6 +14,7 @@ class RuntimeOptionsTests(unittest.TestCase):
                 "--resume",
                 "--agnes-get-retry-attempts", "5",
                 "--agnes-retry-delay-seconds", "1.5",
+                "--agnes-preflight-only",
             ]
         )
         with patch.dict(os.environ, {}, clear=True):
@@ -22,6 +23,7 @@ class RuntimeOptionsTests(unittest.TestCase):
             self.assertEqual(os.environ["DRAMAMATRIX_RESUME"], "1")
             self.assertEqual(os.environ["AGNES_GET_RETRY_ATTEMPTS"], "5")
             self.assertEqual(os.environ["AGNES_RETRY_DELAY_SECONDS"], "1.5")
+            self.assertEqual(os.environ["DRAMAMATRIX_AGNES_PREFLIGHT_ONLY"], "1")
 
     def test_no_resume_is_supported(self):
         options = parse_runtime_options(["--no-resume"])

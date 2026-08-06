@@ -21,6 +21,8 @@ def route_from_start(state: DramaState) -> str:
     """Resume a persisted project at its first unfinished stage."""
     episodes = list(state.get("episodes", {}).values())
     if episodes:
+        if any(ep.status == "submission_uncertain" for ep in episodes):
+            return END
         if any(ep.status in {"script_done", "director_rejected"} for ep in episodes):
             return "agent4_storyboard"
         if any(ep.status in {"storyboard_done", "rendering", "render_pending", "render_failed"} for ep in episodes):
@@ -53,10 +55,14 @@ def route_next_step_for_episode(state: DramaState) -> str:
     # The next process start resumes polling it before any new render is submitted.
     if any(ep.status == "render_pending" for ep in episodes):
         return END
+    if any(ep.status == "submission_uncertain" for ep in episodes):
+        return END
     if any(ep.status == "storyboard_done" for ep in episodes):
         return "agent5_director"
+    # Failed creates are retried only after a new process start, where the
+    # connectivity preflight runs again. Never loop POST attempts in one run.
     if any(ep.status == "render_failed" for ep in episodes):
-        return "agent5_director"
+        return END
     if any(ep.status == "video_generated" for ep in episodes):
         return "agent6_editor"
     if any(ep.status == "edit_completed" for ep in episodes):

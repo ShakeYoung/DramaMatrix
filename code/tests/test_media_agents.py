@@ -3,11 +3,18 @@ import unittest
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
+from src.agents.agent4_storyboard import process_agent4_storyboard
 from src.agents.agent5_director import process_agent5_director
 from src.agents.agent6_editor import process_agent6_editor
 from src.agents.agent7_growth import process_agent7_growth
-from src.agnes_video import AgnesContentPolicyViolation, AgnesVideoError, AgnesVideoSettings
-from src.state import EpisodeScriptData, EpisodeState, GeneratedVideoAsset, ShotStoryboard
+from src.agnes_video import (
+    AgnesConnectionError,
+    AgnesContentPolicyViolation,
+    AgnesSubmissionUncertain,
+    AgnesVideoError,
+    AgnesVideoSettings,
+)
+from src.state import EpisodeScriptData, EpisodeState, FeedbackLog, GeneratedVideoAsset, ShotStoryboard
 
 
 def make_state():
@@ -36,6 +43,53 @@ def make_state():
 
 
 class MediaAgentTests(unittest.TestCase):
+    def test_preflight_failure_blocks_all_create_requests(self):
+        state = make_state()
+        state["episodes"]["ep_02"] = state["episodes"]["ep_01"].model_copy(deep=True)
+        settings = AgnesVideoSettings(api_key="test-key", max_shots_per_episode=1)
+        client = MagicMock()
+        client.preflight.side_effect = AgnesConnectionError("timed out")
+
+        with patch(
+            "src.agents.agent5_director.AgnesVideoSettings.from_environment",
+            return_value=settings,
+        ), patch(
+            "src.agents.agent5_director.AgnesVideoClient", return_value=client
+        ), patch("src.agents.agent5_director.db_save_project_state"):
+            process_agent5_director(state)
+
+        client.create_video.assert_not_called()
+        self.assertEqual(state["system_status"], "blocked_on_agnes_connectivity")
+        self.assertTrue(
+            all(ep.status == "render_failed" for ep in state["episodes"].values())
+        )
+
+    def test_uncertain_submission_stops_later_episodes(self):
+        state = make_state()
+        state["episodes"]["ep_02"] = state["episodes"]["ep_01"].model_copy(deep=True)
+        settings = AgnesVideoSettings(api_key="test-key", max_shots_per_episode=1)
+        client = MagicMock()
+        client.create_video.side_effect = AgnesSubmissionUncertain("timed out")
+
+        with patch(
+            "src.agents.agent5_director.AgnesVideoSettings.from_environment",
+            return_value=settings,
+        ), patch(
+            "src.agents.agent5_director.AgnesVideoClient", return_value=client
+        ), patch("src.agents.agent5_director.db_save_project_state"):
+            process_agent5_director(state)
+
+        self.assertEqual(client.create_video.call_count, 1)
+        self.assertEqual(state["episodes"]["ep_01"].status, "submission_uncertain")
+        self.assertEqual(state["episodes"]["ep_02"].status, "storyboard_done")
+        self.assertEqual(
+            state["system_status"], "blocked_on_agnes_submission_uncertain"
+        )
+
+        client.reset_mock()
+        process_agent5_director(state)
+        client.create_video.assert_not_called()
+
     def test_agents_generate_download_edit_and_cut_assets(self):
         state = make_state()
         settings = AgnesVideoSettings(api_key="test-key", max_shots_per_episode=1)
@@ -151,6 +205,55 @@ class MediaAgentTests(unittest.TestCase):
         self.assertEqual(episode.status, "director_rejected")
         self.assertEqual(state["system_status"], "blocked_on_storyboard_revision")
         self.assertIn("内容策略拒绝", episode.feedback_log[-1].message)
+
+    def test_render_failed_with_assets_resumes_without_clearing_completed_work(self):
+        state = make_state()
+        episode = state["episodes"]["ep_01"]
+        episode.status = "render_failed"
+        episode.video_assets = [
+            GeneratedVideoAsset(
+                shot_id="s01",
+                video_id="video_1",
+                task_id="task_1",
+                status="completed",
+                prompt="done prompt",
+                remote_url="https://example.test/video.mp4",
+                local_path="/tmp/existing.mp4",
+            )
+        ]
+        settings = AgnesVideoSettings(api_key="test-key", max_shots_per_episode=1)
+        client = MagicMock()
+
+        with patch("src.agents.agent5_director.Path.is_file", return_value=True), patch(
+            "src.agents.agent5_director.AgnesVideoSettings.from_environment", return_value=settings
+        ), patch("src.agents.agent5_director.AgnesVideoClient", return_value=client), patch(
+            "src.agents.agent5_director.db_save_project_state"
+        ):
+            process_agent5_director(state)
+
+        self.assertFalse(client.create_video.called)
+        self.assertEqual(len(episode.video_assets), 1)
+        self.assertEqual(episode.video_assets[0].task_id, "task_1")
+        self.assertEqual(episode.status, "video_generated")
+
+    def test_storyboard_recovery_escapes_json_error_feedback(self):
+        state = make_state()
+        episode = state["episodes"]["ep_01"]
+        episode.status = "director_rejected"
+        episode.feedback_log = [
+            FeedbackLog(
+                from_agent="Agent_5_Agnes_Director",
+                to_agent="Agent_4_Storyboard",
+                reason_code="AGNES_RENDER_FAILED",
+                message='镜头 ep_04_s10 的 Agnes 内容策略拒绝：{"error":{"code":"content_policy_violation"}}',
+            )
+        ]
+
+        with patch("src.agents.agent4_storyboard.create_text_model", side_effect=RuntimeError("no model")):
+            process_agent4_storyboard(state)
+
+        self.assertEqual(episode.status, "storyboard_done")
+        self.assertEqual(episode.storyboard_data[0].shot_id, "ep_01_s01")
 
 
 if __name__ == "__main__":

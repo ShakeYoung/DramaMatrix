@@ -2,6 +2,7 @@ import os
 from dotenv import load_dotenv
 from src.db import db_get_project_state_snapshot, db_save_project_state
 from src.graph import build_drama_matrix_graph
+from src.agnes_video import AgnesVideoClient, AgnesVideoError, AgnesVideoSettings
 from src.network import configure_proxy_environment
 from src.project_state import new_project_state, restore_project_state
 from src.runtime_options import apply_runtime_options, parse_runtime_options
@@ -16,7 +17,14 @@ def main(argv=None):
     apply_runtime_options(parse_runtime_options(argv))
     if not os.getenv("AGNES_API_KEY"):
         print("⚠️ 未检测到 AGNES_API_KEY。请在 .env 中配置后再运行真实视频生产流程。")
-        return
+        return 2
+    if os.getenv("DRAMAMATRIX_AGNES_PREFLIGHT_ONLY") == "1":
+        try:
+            AgnesVideoClient(AgnesVideoSettings.from_environment()).preflight()
+        except AgnesVideoError as exc:
+            print(f"❌ {exc}")
+            return 2
+        return 0
     if not has_text_model_credentials():
         print("⚠️ 未检测到文本模型密钥；Agent 2–4 将使用其现有的回退逻辑。")
         
@@ -47,6 +55,7 @@ def main(argv=None):
             
     db_save_project_state(current_state)
     print(f"\n==========✅ 最终系统状态: {current_state.get('system_status')} ==========")
+    return 0
     
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

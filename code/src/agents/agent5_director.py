@@ -7,6 +7,8 @@ from pathlib import Path
 from src.agnes_video import (
     AgnesConfigurationError,
     AgnesContentPolicyViolation,
+    AgnesConnectionError,
+    AgnesSubmissionUncertain,
     AgnesTaskFailed,
     AgnesVideoClient,
     AgnesVideoError,
@@ -81,7 +83,7 @@ def _render_episode(
         print(f"❌ {ep_key} 没有可提交给 Agnes 的分镜。")
         return
 
-    is_resume = ep_state.status in {"rendering", "render_pending"}
+    is_resume = ep_state.status in {"rendering", "render_pending"} or bool(ep_state.video_assets)
     ep_state.status = "rendering"
     if not is_resume:
         ep_state.video_assets = []
@@ -137,6 +139,11 @@ def _render_episode(
             asset.status = "completed"
             asset.local_path = str(local_path)
             _checkpoint(state, ep_key, ep_state)
+        except AgnesSubmissionUncertain as exc:
+            ep_state.status = "submission_uncertain"
+            _checkpoint(state, ep_key, ep_state)
+            print(f"❌ {ep_key}/{shot.shot_id} 提交状态未知，已熔断后续创建：{exc}")
+            return
         except AgnesContentPolicyViolation as exc:
             _reject_episode(
                 ep_key,
@@ -154,7 +161,10 @@ def _render_episode(
             # same remote task instead of submitting a charged duplicate task.
             ep_state.status = "render_pending" if asset and (asset.video_id or asset.task_id) else "render_failed"
             _checkpoint(state, ep_key, ep_state)
-            print(f"❌ {ep_key} 的 Agnes 调用或下载失败：{exc}；已保留任务，重跑将继续恢复。")
+            if asset and (asset.video_id or asset.task_id):
+                print(f"❌ {ep_key} 的 Agnes 任务处理失败：{exc}；已保留任务，重跑将继续恢复。")
+            else:
+                print(f"❌ {ep_key} 的 Agnes 创建前失败：{exc}；未创建可恢复的任务。")
             return
 
     ep_state.status = "video_generated"
@@ -165,6 +175,10 @@ def _render_episode(
 def process_agent5_director(state: DramaState) -> DramaState:
     """Render every storyboard-ready episode through the real Agnes asynchronous API."""
     print("--- [Agent 5: Agnes Video Director] ---")
+    if any(ep.status == "submission_uncertain" for ep in state["episodes"].values()):
+        state["system_status"] = "blocked_on_agnes_submission_uncertain"
+        print("❌ 检测到结果未知的历史提交，已熔断所有新任务；请先在 Agnes 控制台核对。")
+        return state
     targets = [
         (key, ep)
         for key, ep in state["episodes"].items()
@@ -185,17 +199,32 @@ def process_agent5_director(state: DramaState) -> DramaState:
         print(f"❌ Agnes 配置错误：{exc}")
         return state
 
+    try:
+        client.preflight()
+    except (AgnesConnectionError, AgnesConfigurationError) as exc:
+        for ep_key, ep_state in targets:
+            if ep_state.status in {"rendering", "render_pending"}:
+                ep_state.status = "render_pending"
+            elif ep_state.status != "submission_uncertain":
+                ep_state.status = "render_failed"
+            state["episodes"][ep_key] = ep_state
+        state["system_status"] = "blocked_on_agnes_connectivity"
+        print(f"❌ Agnes 连通性熔断：{exc}")
+        return state
+
     for ep_key, ep_state in targets:
         _render_episode(state, ep_key, ep_state, client, settings)
         state["episodes"][ep_key] = ep_state
         if ep_state.status == "director_rejected":
             break
-        if ep_state.status == "render_pending":
-            # Do not submit later episodes while the proxy is unstable.
+        if ep_state.status in {"render_pending", "render_failed", "submission_uncertain"}:
+            # A failed or ambiguous operation must stop later submissions.
             break
 
     if any(ep.status == "director_rejected" for _, ep in targets):
         state["system_status"] = "blocked_on_storyboard_revision"
+    elif any(ep.status == "submission_uncertain" for _, ep in targets):
+        state["system_status"] = "blocked_on_agnes_submission_uncertain"
     elif any(ep.status in {"render_failed", "render_pending"} for _, ep in targets):
         state["system_status"] = "blocked_on_agnes_render"
     else:

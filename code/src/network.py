@@ -25,7 +25,7 @@ def configure_proxy_environment() -> None:
         with socket.create_connection((parsed.hostname, parsed.port), timeout=1):
             pass
     except OSError as exc:
-        print(f"⚠️ 本地代理不可用（{proxy_url}: {exc}），已改为直连 Agnes API。")
+        print(f"⚠️ 全局代理不可用（{proxy_url}: {exc}），已禁用该代理。")
         clear_proxy_environment()
         return
     for name in _PROXY_VARIABLES:

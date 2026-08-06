@@ -60,6 +60,7 @@ class EpisodeState(BaseModel):
         "storyboard_done",
         "rendering",
         "render_pending",
+        "submission_uncertain",
         "director_rejected",
         "render_failed",
         "video_generated",

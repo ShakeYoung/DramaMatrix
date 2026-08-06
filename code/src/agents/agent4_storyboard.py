@@ -10,6 +10,12 @@ class StoryboardOutput(BaseModel):
     """用于确保 LLM 严格输出列表列表的包装类"""
     shots: List[ShotStoryboard] = Field(description="分镜列表")
 
+
+def _escape_template_text(value: str) -> str:
+    """Escape literal braces before embedding arbitrary text in a LangChain f-string template."""
+    return value.replace("{", "{{").replace("}", "}}")
+
+
 # Prompt Template definition
 STORYBOARD_SYSTEM_PROMPT = """你是一个资深的短剧分镜师和AI视频提示词专家。
 你的任务是将编剧发来的【剧情梗概和结局悬念】转化为可被生视频大模型直接读取的【Structured Modal Cards (结构化多模态分镜表)】。
@@ -52,7 +58,9 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
         sys_prompt = STORYBOARD_SYSTEM_PROMPT
         if is_recovery and ep_state.feedback_log:
             last_error = ep_state.feedback_log[-1].message
-            sys_prompt += "\n\n" + STORYBOARD_RECOVERY_PROMPT.format(error_message=last_error)
+            sys_prompt += "\n\n" + STORYBOARD_RECOVERY_PROMPT.format(
+                error_message=_escape_template_text(last_error)
+            )
             print(f"!! 进入 Recovery 模式 (B计划), 处理反馈: {last_error}")
         
         sys_prompt += "\n\n" + parser.get_format_instructions().replace("{", "{{").replace("}", "}}")

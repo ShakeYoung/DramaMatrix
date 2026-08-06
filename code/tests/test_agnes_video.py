@@ -2,12 +2,14 @@ import json
 import tempfile
 import unittest
 from unittest.mock import patch
-from io import BytesIO
-from urllib.error import HTTPError, URLError
+
+import requests
 
 from src.agnes_video import (
     AgnesConfigurationError,
+    AgnesConnectionError,
     AgnesContentPolicyViolation,
+    AgnesSubmissionUncertain,
     AgnesTaskFailed,
     AgnesVideoClient,
     AgnesVideoSettings,
@@ -17,8 +19,19 @@ from src.agnes_video import (
 
 
 class FakeResponse:
-    def __init__(self, payload):
+    def __init__(self, payload, status_code=200, headers=None, chunks=None):
         self.payload = payload
+        self.status_code = status_code
+        self.headers = headers or {}
+        self.chunks = chunks
+
+    @property
+    def text(self):
+        return json.dumps(self.payload)
+
+    @property
+    def ok(self):
+        return 200 <= self.status_code < 400
 
     def __enter__(self):
         return self
@@ -26,26 +39,18 @@ class FakeResponse:
     def __exit__(self, exc_type, exc_value, traceback):
         return False
 
-    def read(self):
-        return json.dumps(self.payload).encode("utf-8")
+    def json(self):
+        return self.payload
 
+    def raise_for_status(self):
+        if not self.ok:
+            raise requests.HTTPError(response=self)
 
-class FakeBinaryResponse:
-    def __init__(self, payload):
-        self.payload = payload
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, exc_type, exc_value, traceback):
-        return False
-
-    def read(self, size=-1):
-        if size == -1:
-            result, self.payload = self.payload, b""
-            return result
-        result, self.payload = self.payload[:size], self.payload[size:]
-        return result
+    def iter_content(self, chunk_size):
+        for chunk in self.chunks if self.chunks is not None else [b"video-bytes"]:
+            if isinstance(chunk, Exception):
+                raise chunk
+            yield chunk
 
 
 class AgnesVideoClientTests(unittest.TestCase):
@@ -58,16 +63,48 @@ class AgnesVideoClientTests(unittest.TestCase):
 
     def test_create_video_uses_documented_endpoint_and_valid_frame_count(self):
         client = AgnesVideoClient(self.settings)
-        with patch("src.agnes_video.urlopen", return_value=FakeResponse({"video_id": "video_123", "status": "queued"})) as mocked_open:
+        with patch.object(
+            client.session,
+            "request",
+            return_value=FakeResponse({"video_id": "video_123", "status": "queued"}),
+        ) as mocked_request:
             response = client.create_video("a scene", "no text", "5s", seed=42)
 
         self.assertEqual(response["video_id"], "video_123")
-        request = mocked_open.call_args.args[0]
-        payload = json.loads(request.data.decode("utf-8"))
-        self.assertEqual(request.full_url, "https://apihub.agnes-ai.com/v1/videos")
+        self.assertEqual(
+            mocked_request.call_args.args,
+            ("POST", "https://apihub.agnes-ai.com/v1/videos"),
+        )
+        payload = mocked_request.call_args.kwargs["json"]
         self.assertEqual(payload["model"], "agnes-video-v2.0")
         self.assertEqual(payload["num_frames"], 121)
         self.assertEqual(payload["frame_rate"], 24)
+
+    def test_preflight_checks_https_without_creating_task(self):
+        client = AgnesVideoClient(self.settings)
+        with patch.object(
+            client.session, "get", return_value=FakeResponse({"object": "list"})
+        ) as mocked_get, patch.object(client.session, "request") as mocked_request:
+            client.preflight()
+        self.assertEqual(mocked_get.call_args.args[0], "https://apihub.agnes-ai.com/v1/models")
+        mocked_request.assert_not_called()
+
+    def test_preflight_has_actionable_connection_error(self):
+        client = AgnesVideoClient(self.settings)
+        with patch.object(
+            client.session, "get", side_effect=requests.ConnectTimeout("timed out")
+        ):
+            with self.assertRaisesRegex(AgnesConnectionError, "AGNES_PROXY_URL"):
+                client.preflight()
+
+    def test_create_timeout_is_uncertain_and_never_retried(self):
+        client = AgnesVideoClient(self.settings)
+        with patch.object(
+            client.session, "request", side_effect=requests.ReadTimeout("timed out")
+        ) as mocked_request:
+            with self.assertRaises(AgnesSubmissionUncertain):
+                client.create_video("a scene", "no text", "5s", seed=42)
+        self.assertEqual(mocked_request.call_count, 1)
 
     def test_wait_for_video_returns_completed_payload(self):
         client = AgnesVideoClient(self.settings)
@@ -101,34 +138,53 @@ class AgnesVideoClientTests(unittest.TestCase):
 
     def test_get_request_retries_network_eof(self):
         client = AgnesVideoClient(self.settings)
-        with patch("src.agnes_video.urlopen", side_effect=[URLError("SSL EOF"), FakeResponse({"status": "queued"})]) as mocked_open:
+        with patch.object(
+            client.session,
+            "request",
+            side_effect=[requests.ConnectionError("SSL EOF"), FakeResponse({"status": "queued"})],
+        ) as mocked_request, patch("src.agnes_video.time.sleep"):
             result = client.get_task("task_123")
         self.assertEqual(result["status"], "queued")
-        self.assertEqual(mocked_open.call_count, 2)
+        self.assertEqual(mocked_request.call_count, 2)
 
     def test_content_policy_http_error_is_typed(self):
         client = AgnesVideoClient(self.settings)
-        error_body = b'{"error":{"code":"content_policy_violation","message":"blocked"}}'
-        http_error = HTTPError(
-            "https://apihub.agnes-ai.com/v1/videos/task_123",
-            400,
-            "Bad Request",
-            {},
-            BytesIO(error_body),
+        response = FakeResponse(
+            {"error": {"code": "content_policy_violation", "message": "blocked"}},
+            status_code=400,
         )
-        with patch("src.agnes_video.urlopen", side_effect=http_error):
+        with patch.object(client.session, "request", return_value=response):
             with self.assertRaises(AgnesContentPolicyViolation):
                 client.get_task("task_123")
 
     def test_download_retries_network_eof(self):
         client = AgnesVideoClient(self.settings)
-        with tempfile.TemporaryDirectory() as directory, patch(
-            "src.agnes_video.urlopen",
-            side_effect=[URLError("SSL EOF"), FakeBinaryResponse(b"video-bytes")],
-        ) as mocked_open:
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            client.session,
+            "get",
+            side_effect=[requests.ConnectionError("SSL EOF"), FakeResponse({}, chunks=[b"video-bytes"])],
+        ) as mocked_get, patch("src.agnes_video.time.sleep"):
             destination = client.download_video("https://example.test/video.mp4", __import__("pathlib").Path(directory) / "video.mp4")
-        self.assertEqual(mocked_open.call_count, 2)
+        self.assertEqual(mocked_get.call_count, 2)
         self.assertEqual(destination.name, "video.mp4")
+
+    def test_download_resumes_a_partial_file_with_range(self):
+        client = AgnesVideoClient(self.settings)
+        interrupted = FakeResponse(
+            {}, chunks=[b"partial", requests.ConnectionError("connection reset")]
+        )
+        resumed = FakeResponse({}, status_code=206, chunks=[b"-video"])
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            client.session, "get", side_effect=[interrupted, resumed]
+        ) as mocked_get, patch("src.agnes_video.time.sleep"):
+            destination = client.download_video(
+                "https://example.test/video.mp4",
+                __import__("pathlib").Path(directory) / "video.mp4",
+            )
+            self.assertEqual(destination.read_bytes(), b"partial-video")
+            self.assertEqual(
+                mocked_get.call_args_list[1].kwargs["headers"]["Range"], "bytes=7-"
+            )
 
     def test_wait_for_video_raises_for_remote_failure(self):
         client = AgnesVideoClient(self.settings)

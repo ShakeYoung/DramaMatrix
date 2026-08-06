@@ -29,6 +29,11 @@ def parse_runtime_options(argv: Sequence[str] | None = None) -> argparse.Namespa
         type=float,
         help="Agnes GET 重试间隔秒数（默认读取 .env 或 2）。",
     )
+    parser.add_argument(
+        "--agnes-preflight-only",
+        action="store_true",
+        help="只验证 Agnes HTTPS、代理和 API Key，不创建视频任务。",
+    )
     return parser.parse_args(argv)
 
 
@@ -42,6 +47,7 @@ def apply_runtime_options(options: argparse.Namespace) -> None:
         "AGNES_RETRY_DELAY_SECONDS": (
             None if options.agnes_retry_delay_seconds is None else str(options.agnes_retry_delay_seconds)
         ),
+        "DRAMAMATRIX_AGNES_PREFLIGHT_ONLY": "1" if options.agnes_preflight_only else None,
     }
     for name, value in overrides.items():
         if value is not None:
