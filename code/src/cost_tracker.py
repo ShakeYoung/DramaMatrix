@@ -33,20 +33,49 @@ class AgnesUsageRecord:
 
 @dataclass
 class CostTracker:
-    """Accumulates Agnes usage and enforces a submission budget guardrail."""
+    """Accumulates Agnes usage and enforces a submission budget guardrail.
+
+    The budget is DURABLE across runs (review F8): the create_count is seeded
+    from the persisted usage report at construction, and the report is written
+    in append mode so prior usage is never overwritten/lost on restart.
+    """
 
     max_creates: int = 0  # 0 => unlimited
     records: list = field(default_factory=list)
+    report_path: Optional[Path] = None
+    prior_count: int = 0  # usage persisted by previous runs
+
+    def __post_init__(self) -> None:
+        # Durable budget (F8): when constructed with a report_path, auto-seed
+        # prior_count from the persisted file so the limit holds across restarts,
+        # regardless of construction path (direct or from_environment()).
+        if self.report_path:
+            self.prior_count = self._count_existing_rows(self.report_path)
 
     @classmethod
     def from_environment(cls) -> "CostTracker":
+        report_path = output_root() / "agnes_usage_report.csv"
         return cls(
             max_creates=int(os.getenv("DRAMAMATRIX_MAX_AGNES_CREATES", "0") or 0),
+            report_path=report_path,
+            prior_count=cls._count_existing_rows(report_path),
         )
+
+    @staticmethod
+    def _count_existing_rows(report_path: Path) -> int:
+        if not report_path.is_file():
+            return 0
+        try:
+            with report_path.open(encoding="utf-8") as handle:
+                reader = csv.DictReader(handle)
+                return sum(1 for _ in reader)
+        except (OSError, csv.Error):
+            return 0
 
     @property
     def create_count(self) -> int:
-        return len(self.records)
+        # real records from this run + persisted count from prior runs
+        return len(self.records) + self.prior_count
 
     def record_create(self, **kwargs) -> None:
         self.records.append(AgnesUsageRecord(**kwargs))
@@ -55,14 +84,16 @@ class CostTracker:
         return self.max_creates > 0 and self.create_count >= self.max_creates
 
     def write_report(self, directory: Optional[Path] = None) -> Path:
-        """Flush records to report.csv under the output root (or given dir)."""
+        """Persist usage to report.csv in APPEND mode so history is retained."""
         directory = directory or output_root()
         directory.mkdir(parents=True, exist_ok=True)
-        report_path = directory / "agnes_usage_report.csv"
+        report_path = self.report_path or (directory / "agnes_usage_report.csv")
         fieldnames = list(AgnesUsageRecord.__dataclass_fields__.keys())
-        with report_path.open("w", newline="", encoding="utf-8") as handle:
+        write_header = not report_path.exists() or report_path.stat().st_size == 0
+        with report_path.open("a", newline="", encoding="utf-8") as handle:
             writer = csv.DictWriter(handle, fieldnames=fieldnames)
-            writer.writeheader()
+            if write_header:
+                writer.writeheader()
             for record in self.records:
                 writer.writerow(asdict(record))
         return report_path

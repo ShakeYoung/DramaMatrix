@@ -81,6 +81,8 @@ def process_agent8_analytics(state: DramaState) -> DramaState:
     # 注入全局状态，供下次 Agent 1 抓取时使用
     state["market_feedback"] = feedback
     state["task_cycle"] = state.get("task_cycle", 1) + 1
+    # 新市场周期开始时重置换书尝试次数，避免上一周期消耗压缩本周期额度（F9）
+    state["scout_attempts"] = 0
     state["system_status"] = "cycle_completed_ready_for_next"
     
     print(f"✅ 市场偏好提取完毕。建议下期标签: {feedback.suggested_tags}")

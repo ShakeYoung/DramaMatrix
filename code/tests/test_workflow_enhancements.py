@@ -286,5 +286,122 @@ class EpisodeStateRoundTripTests(unittest.TestCase):
         self.assertEqual(restored.growth_assets[0].headline, "h")
 
 
+class RestoreCharactersTests(unittest.TestCase):
+    def test_restore_rehydrates_characters_to_CharacterSheet(self):
+        # Regression (F4): characters must be dicts -> CharacterSheet after restore.
+        from src.project_state import restore_project_state
+        from src.characters import render_character_block
+
+        snapshot = {
+            "state": {
+                "project_id": "p",
+                "meta_info": {},
+                "market_feedback": None,
+                "source_material": {},
+                "master_script_outline": "",
+                "episodes": {},
+                "task_cycle": 1,
+                "scout_attempts": 0,
+                "characters": [{"name": "男主", "appearance": "红衣", "signature": "", "role": ""}],
+                "system_status": "x",
+            }
+        }
+        state = restore_project_state(snapshot)
+        self.assertIsInstance(state["characters"][0], CharacterSheet)
+        # Must not raise AttributeError
+        render_character_block(state["characters"])
+
+
+class SubtitleDistinctOutputTests(unittest.TestCase):
+    def test_apply_subtitles_uses_distinct_output_file(self):
+        # Regression (F2): the burned output must NOT overwrite the input path.
+        from src.agents.agent6_editor import _apply_subtitles
+        from unittest.mock import patch as _patch
+
+        ep = make_episode()
+        ep.script_data = EpisodeScriptData(ep_id="ep_01", outline="o", ending_hook="h")
+        with tempfile.TemporaryDirectory() as directory:
+            ep_dir = Path(directory)
+            video = ep_dir / "ep_01_master.mp4"
+            video.write_bytes(b"fake-video")
+            with _patch(
+                "src.agents.agent6_editor.burn_subtitles",
+                side_effect=lambda video, ass, out: (out.parent.mkdir(parents=True, exist_ok=True), out.write_bytes(b"burned"), out)[2],
+            ) as burn:
+                result = _apply_subtitles(ep, video, ep_dir)
+            burned, ass_path = result
+            # output name differs from the input master
+            self.assertNotEqual(burned.name, video.name)
+            self.assertIn("subtitled", burned.name)
+            # input still intact
+            self.assertEqual(video.read_bytes(), b"fake-video")
+
+
+class ScoutAttemptResetTests(unittest.TestCase):
+    def test_agent8_resets_scout_attempts_on_new_cycle(self):
+        # Regression (F9): a new market cycle must reset the换书 attempt budget.
+        from src.agents.agent8_analytics import process_agent8_analytics
+        from unittest.mock import patch as _patch
+
+        state = {
+            "project_id": "p",
+            "meta_info": {"genre_tags": ["女频"]},
+            "market_feedback": None,
+            "source_material": {},
+            "master_script_outline": "",
+            "episodes": {"ep_01": EpisodeState(status="growth_ready")},
+            "task_cycle": 1,
+            "scout_attempts": 2,  # consumed in the previous cycle
+            "characters": [],
+            "system_status": "x",
+        }
+        with _patch(
+            "src.agents.agent8_analytics.sqlite3.connect", side_effect=RuntimeError("no db")
+        ):
+            process_agent8_analytics(state)
+        self.assertEqual(state["task_cycle"], 2)
+        self.assertEqual(state["scout_attempts"], 0)
+
+
+class DurableBudgetTests(unittest.TestCase):
+    def test_create_count_seeded_from_persisted_report(self):
+        # Regression (F8): budget must survive restarts via persisted report count.
+        from src.cost_tracker import CostTracker
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            report = base / "report.csv"
+            # Pre-write a report with 2 prior usage rows.
+            report.write_text(
+                "project_id,ep_key,shot_id,task_id,frames,width,height,created_at_unix\n"
+                "p,ep_01,s1,t1,49,720,1280,\n"
+                "p,ep_01,s2,t2,49,720,1280,\n",
+                encoding="utf-8",
+            )
+            tracker = CostTracker(max_creates=3, report_path=report)
+            # Seeded from file => already 2 creates used.
+            self.assertEqual(tracker.create_count, 2)
+            self.assertFalse(tracker.budget_exhausted())
+            tracker.record_create(project_id="p", ep_key="ep_01", shot_id="s3", task_id="t3", frames=49, width=720, height=1280)
+            self.assertTrue(tracker.budget_exhausted())
+
+    def test_write_report_appends_not_overwrites(self):
+        from src.cost_tracker import CostTracker
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            report = base / "report.csv"
+            tracker = CostTracker(max_creates=0, report_path=report)
+            tracker.record_create(project_id="p", ep_key="ep_01", shot_id="s1", task_id="t1", frames=49, width=720, height=1280)
+            tracker.write_report(base)
+            # second run/tracker appends
+            tracker2 = CostTracker(max_creates=0, report_path=report)
+            tracker2.record_create(project_id="p", ep_key="ep_01", shot_id="s2", task_id="t2", frames=49, width=720, height=1280)
+            tracker2.write_report(base)
+            lines = report.read_text(encoding="utf-8").strip().splitlines()
+            # header + 2 data rows (append preserved the first row)
+            self.assertEqual(len(lines), 3)
+
+
 if __name__ == "__main__":
     unittest.main()

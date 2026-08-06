@@ -92,10 +92,14 @@ def _apply_subtitles(ep_state: EpisodeState, video_path: Path, ep_dir: Path):
         cursor += duration
     if not any(text for text, _, _ in segments):
         return None
-    ass_path = build_ass_track(segments, ep_dir / f"{ep_state.script_data.ep_id if ep_state.script_data else 'ep'}_subs.ass")
+    subs_name = f"{ep_state.script_data.ep_id if ep_state.script_data else 'ep'}_subs"
+    ass_path = build_ass_track(segments, ep_dir / f"{subs_name}.ass")
     if not ass_path.exists():
         return None
-    out = ep_dir / f"{Path(video_path).name}"
+    # Use a DISTINCT output name: FFmpeg cannot overwrite its own input in-place
+    # (review F2). Success is only returned for the burned copy; the caller
+    # promotes it to final_video_path.
+    out = ep_dir / f"{subs_name}_subtitled.mp4"
     burned = burn_subtitles(video_path, ass_path, out)
     if burned == video_path:
         # No ffmpeg / subtitles disabled: fall back to video unchanged.

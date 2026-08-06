@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from src.state import EpisodeState, EvaluationReport, MarketFeedback
+from src.state import CharacterSheet, EpisodeState, EvaluationReport, MarketFeedback
 
 
 def new_project_state(project_id: str) -> dict[str, Any]:
@@ -35,4 +35,13 @@ def restore_project_state(snapshot: dict[str, Any]) -> dict[str, Any]:
     feedback = state.get("market_feedback")
     if isinstance(feedback, dict):
         state["market_feedback"] = MarketFeedback.model_validate(feedback)
+    # 恢复角色一致性表（阶段3/F4）：否则后续 render_character_block 访问
+    # ch.name 会对 dict 抛 AttributeError。
+    if isinstance(state.get("characters"), list):
+        state["characters"] = [
+            CharacterSheet.model_validate(ch) if isinstance(ch, dict) else ch
+            for ch in state["characters"]
+        ]
+    elif state.get("characters") is None:
+        state["characters"] = []
     return state

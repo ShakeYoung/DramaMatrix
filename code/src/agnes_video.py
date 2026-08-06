@@ -176,6 +176,17 @@ class AgnesVideoClient:
                 "User-Agent": "DramaMatrix/1.0",
             }
         )
+        # Separate session for media downloads. `metadata.url` usually points at
+        # an external CDN, NOT the Agnes API host; sending the API key there
+        # would leak credentials to a third party. This session deliberately
+        # carries no Authorization header (security, see review F1).
+        self.download_session = requests.Session()
+        self.download_session.trust_env = False
+        if settings.proxy_url:
+            self.download_session.proxies.update(
+                {"http": settings.proxy_url, "https": settings.proxy_url}
+            )
+        self.download_session.headers.update({"User-Agent": "DramaMatrix/1.0"})
 
     @property
     def result_base_url(self) -> str:
@@ -222,6 +233,12 @@ class AgnesVideoClient:
         if response.status_code >= 500:
             raise AgnesConnectionError(
                 f"Agnes 预检失败（preflight）：网关返回 HTTP {response.status_code}，请稍后重试。"
+            )
+        if not (200 <= response.status_code < 300):
+            # 404/429/3xx redirects are NOT a healthy sign for /models.
+            raise AgnesConnectionError(
+                f"Agnes 预检失败（preflight）：端点返回 HTTP {response.status_code}，"
+                "预期为 2xx。请检查 base_url 与网关状态。"
             )
         print(
             f"✅ Agnes HTTPS 预检通过：{self.route_description} -> "
@@ -377,7 +394,7 @@ class AgnesVideoClient:
             offset = temporary.stat().st_size if temporary.exists() else 0
             headers = {"Range": f"bytes={offset}-"} if offset else {}
             try:
-                with self.session.get(
+                with self.download_session.get(
                     remote_url,
                     headers=headers,
                     timeout=self.request_timeout,
@@ -396,7 +413,7 @@ class AgnesVideoClient:
                     temporary.replace(destination)
                     return destination
                 raise AgnesVideoError("下载的视频文件为空。")
-            except (requests.Timeout, requests.ConnectionError) as exc:
+            except (requests.Timeout, requests.ConnectionError, requests.exceptions.ChunkedEncodingError) as exc:
                 if attempt < self.settings.get_retry_attempts:
                     delay = self._retry_delay(attempt)
                     retained_bytes = temporary.stat().st_size if temporary.exists() else 0

@@ -60,22 +60,17 @@ def build_voiceover(
     """Stitch per-line dialogue into a single voiceover track laid to BGM duration.
 
     dialogue_segments: [(dialogue_text, shot_duration_seconds)...]
-    Because no generic TTS backend is shipped, this produces a silent track at
-    the total shot length so downstream muxing is stable. A server TTS
-    implementation can override synthesize_line and build real audio.
+    No generic TTS backend is shipped, so real synthesis is not performed here;
+    the server deployment overrides synthesize_line. To avoid silently replacing
+    the original (usually silent) track with a blank one, this returns
+    audio_path=None (no voiceover) unless a real voiceover was actually produced.
     """
     if not tts_enabled():
         return TTSResult(audio_path=None, voiceover=False, segments_built=0)
 
-    total = sum(max(d, 0.0) for _, d in dialogue_segments)
-    if total <= 0:
-        total = 1.0
-    silent = _make_silent_track(total, destination_dir / "voiceover_silent.m4a")
-    return TTSResult(
-        audio_path=str(silent) if silent else None,
-        voiceover=False,
-        segments_built=0,
-    )
+    # No real synth backend: do NOT fabricate a silent replacement. Agent 6 will
+    # keep the source audio and print an accurate "无配音" note (review F5).
+    return TTSResult(audio_path=None, voiceover=False, segments_built=0)
 
 
 def _make_silent_track(duration_seconds: float, destination: Path) -> Optional[Path]:

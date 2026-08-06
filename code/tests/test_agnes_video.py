@@ -160,7 +160,7 @@ class AgnesVideoClientTests(unittest.TestCase):
     def test_download_retries_network_eof(self):
         client = AgnesVideoClient(self.settings)
         with tempfile.TemporaryDirectory() as directory, patch.object(
-            client.session,
+            client.download_session,
             "get",
             side_effect=[requests.ConnectionError("SSL EOF"), FakeResponse({}, chunks=[b"video-bytes"])],
         ) as mocked_get, patch("src.agnes_video.time.sleep"):
@@ -175,7 +175,7 @@ class AgnesVideoClientTests(unittest.TestCase):
         )
         resumed = FakeResponse({}, status_code=206, chunks=[b"-video"])
         with tempfile.TemporaryDirectory() as directory, patch.object(
-            client.session, "get", side_effect=[interrupted, resumed]
+            client.download_session, "get", side_effect=[interrupted, resumed]
         ) as mocked_get, patch("src.agnes_video.time.sleep"):
             destination = client.download_video(
                 "https://example.test/video.mp4",
@@ -198,6 +198,46 @@ class AgnesVideoClientTests(unittest.TestCase):
         self.assertEqual(safe_component("../../ep 01"), "ep_01")
         self.assertEqual(frames_for_duration("5s", 24), 121)
         self.assertEqual(frames_for_duration("4s", 24), 97)
+
+    def test_download_session_has_no_authorization_header(self):
+        # Security regression (F1): media downloads must never carry the API key,
+        # even if it would otherwise leak to an external CDN host.
+        client = AgnesVideoClient(self.settings)
+        auth = client.session.headers.get("Authorization")
+        self.assertIsNotNone(auth)
+        self.assertIn("Bearer", auth)
+        self.assertNotIn(
+            "Authorization",
+            client.download_session.headers,
+        )
+
+    def test_preflight_requires_2xx(self):
+        # Preflight must reject non-2xx (404/429/3xx) instead of false-passing (F6).
+        client = AgnesVideoClient(self.settings)
+        with patch.object(
+            client.session, "get", return_value=FakeResponse({}, status_code=404)
+        ):
+            with self.assertRaises(AgnesConnectionError):
+                client.preflight()
+
+    def test_download_retries_chunked_encoding_error(self):
+        # F7: ChunkedEncodingError must retry like Timeout/ConnectionError.
+        client = AgnesVideoClient(self.settings)
+        ok = FakeResponse({}, chunks=[b"body"])
+        with tempfile.TemporaryDirectory() as directory, patch.object(
+            client.download_session,
+            "get",
+            side_effect=[
+                requests.exceptions.ChunkedEncodingError("chunk lost"),
+                ok,
+            ],
+        ) as mocked_get, patch("src.agnes_video.time.sleep"):
+            destination = client.download_video(
+                "https://example.test/video.mp4",
+                __import__("pathlib").Path(directory) / "video.mp4",
+            )
+            self.assertEqual(mocked_get.call_count, 2)
+            self.assertEqual(destination.read_bytes(), b"body")
 
 
 if __name__ == "__main__":

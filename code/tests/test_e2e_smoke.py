@@ -67,6 +67,8 @@ class EndToEndSmokeTests(unittest.TestCase):
         ), mock.patch("src.agents.agent7_growth.cut_video", side_effect=fake_cut), mock.patch(
             "src.agents.agent6_editor.mix_audio_into_video",
             side_effect=lambda v, a, d: (d.parent.mkdir(parents=True, exist_ok=True), d.write_bytes(b"x"), d)[2],
+        ), mock.patch("src.agents.agent6_editor._apply_voiceover", return_value=None), mock.patch(
+            "src.agents.agent6_editor._apply_subtitles", return_value=None
         ):
             nodes = []
             for s in g.stream(state, {"recursion_limit": 80}):
