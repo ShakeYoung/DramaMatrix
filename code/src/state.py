@@ -18,6 +18,14 @@ class EpisodeScriptData(BaseModel):
     outline: str = Field(description="本集的核心剧情梗概")
     ending_hook: str = Field(description="本集结尾的悬念/钩子")
 
+
+class CharacterSheet(BaseModel):
+    """单角色一致性描述表，供分镜与视频生成时的角色身份保持（阶段3）。"""
+    name: str = Field(description="角色名")
+    appearance: str = Field(description="外形与服化描述，例如'红衣黑发青年，佩戴玉坠'")
+    signature: str = Field(description="标志性特征/口头禅，用于稳定身份")
+    role: str = Field(default="", description="角色定位，如'男主/女主/反派'")
+
 class EvaluationReport(BaseModel):
     """小说爆点评估与可行性报告 (Agent 2)"""
     score: int = Field(description="爽度与可行性综合打分 (1-100)")
@@ -51,6 +59,18 @@ class GrowthAsset(BaseModel):
     path: str
     start_seconds: float
     duration_seconds: float
+    # 投流元数据：用于上架货架/信息流的标题、简介与标签
+    headline: Optional[str] = Field(default=None, description="切片用作广告时的标题文案")
+    description: Optional[str] = Field(default=None, description="切片简介")
+    tags: Optional[List[str]] = Field(default=None, description="推荐投放标签")
+
+
+class GrowthMeta(BaseModel):
+    """单集成片投流所需的发布元数据（标题/简介/标签/封面提示）。"""
+    title: str = Field(description="成片发布标题")
+    description: str = Field(description="成片发布简介/导语")
+    tags: List[str] = Field(default_factory=list, description="发布推荐标签")
+    cover_prompt: str = Field(description="封面图生成提示词")
 
 class EpisodeState(BaseModel):
     """单集的完整状态字典模式 (在图节点中流转的状态封装)"""
@@ -75,6 +95,13 @@ class EpisodeState(BaseModel):
     video_assets: List[GeneratedVideoAsset] = Field(default_factory=list)
     final_video_path: Optional[str] = None
     growth_assets: List[GrowthAsset] = Field(default_factory=list)
+    # 本集涉及的角色一致性表（阶段3）
+    characters: List[CharacterSheet] = Field(default_factory=list)
+    # 生产过程中附加的要素（阶段2）：配音/混音音轨与烧录后的字幕路径
+    audio_track: Optional[str] = Field(default=None)
+    subtitle_track: Optional[str] = Field(default=None)
+    # 投流发布元数据（Agent 7）
+    growth_meta: Optional[GrowthMeta] = Field(default=None)
 
 
 class MarketFeedback(BaseModel):
@@ -107,5 +134,13 @@ class DramaState(TypedDict):
     # 我们暂时直接整体覆盖某一集状态，以简化逻辑
     episodes: Dict[str, EpisodeState]
     
+    # 全剧循环控制：标记整部短剧正处于第几次"选品→成片→投流"周期，
+    # 以及截至当前周期所尝试过的源头素材数（用于被否换书与市场回环的上限约束）。
+    task_cycle: int
+    scout_attempts: int
+    
+    # 全剧角色一致性表（阶段3）：由 Agent 3 抽取，Agent 4/5 注入生成提示
+    characters: List[CharacterSheet]
+
     # 全局系统卡点状态 (如 starting, drafting, blocked, done)
     system_status: str

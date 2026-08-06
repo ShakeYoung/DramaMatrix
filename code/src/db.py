@@ -44,6 +44,19 @@ def init_db():
         recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
+    # Structured run log (阶段4): one row per node transition per run
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS run_logs (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        project_id TEXT,
+        node TEXT,
+        system_status TEXT,
+        cycle INTEGER,
+        event TEXT,
+        level TEXT DEFAULT 'INFO',
+        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
     conn.commit()
     conn.close()
 
@@ -92,6 +105,18 @@ def db_mark_novel_processed(title, status="processed"):
     cursor.execute("UPDATE novels SET status = ? WHERE title = ?", (status, title))
     conn.commit()
     conn.close()
+
+
+def db_insert_run_log(project_id, node, system_status, cycle=None, event="transition", level="INFO"):
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        conn.execute(
+            "INSERT INTO run_logs (project_id, node, system_status, cycle, event, level) VALUES (?, ?, ?, ?, ?, ?)",
+            (project_id, node, system_status, cycle, event, level),
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _json_default(value: Any) -> Any:

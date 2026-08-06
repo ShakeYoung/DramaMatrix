@@ -15,6 +15,9 @@ def new_project_state(project_id: str) -> dict[str, Any]:
         "source_material": {},
         "master_script_outline": "",
         "episodes": {},
+        "task_cycle": 1,
+        "scout_attempts": 0,
+        "characters": [],
         "system_status": "starting",
     }
 

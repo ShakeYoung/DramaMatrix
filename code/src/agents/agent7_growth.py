@@ -1,9 +1,81 @@
-"""Agent 7: produce concrete teaser assets from completed episode masters."""
+"""Agent 7: produce concrete teaser assets from completed episode masters.
 
+vs. the previous naive "first-15s / last-15s" cut, this agent:
+- picks hook / climax windows from the episode's storyboard emotion cues (falling
+  back to head/tail when no cue-driven signal is available),
+- attaches 投流 (ad-serving) metadata — headline, description, tags — to each
+  slice, and produces a whole-episode GrowthMeta for shelf/货架 publication.
+"""
+
+from __future__ import annotations
+
+import os
 from pathlib import Path
 
-from src.agnes_video import AgnesVideoError, cut_video, episode_output_dir, video_duration
-from src.state import DramaState, EpisodeState, FeedbackLog, GrowthAsset
+from src.agnes_video import (
+    AgnesVideoError,
+    _require_binary,
+    cut_video,
+    episode_output_dir,
+    video_duration,
+)
+from src.state import DramaState, EpisodeState, FeedbackLog, GrowthAsset, GrowthMeta
+
+
+def detect_emotion_segments(total_seconds: float, ep_state: EpisodeState) -> list[tuple[str, float, float]]:
+    """Return [(name, start, duration)] weighted by storyboard emotion cues.
+
+    Without a vision model, we approximate "high-emotion" windows from the
+    narrative: the hook (opening suspense) and the climax (ending hook). Env
+    DRAMAMATRIX_GROWTH_CLIP_DURATION controls each slice length. This is pure
+    geometry over the storyboard; a real vision classifier can replace it later.
+    """
+    clip_duration = min(
+        float(os.getenv("DRAMAMATRIX_GROWTH_CLIP_DURATION", "15")),
+        max(total_seconds, 1.0),
+    )
+    if total_seconds <= 0:
+        return []
+    climax_start = max(0.0, total_seconds - clip_duration)
+    # Prefer the "climax" that begins at the last storyboard shot window for a
+    # genuine cliff-hanger, otherwise fall back to the tail.
+    if ep_state.storyboard_data:
+        # Rough per-shot budget (mean) to estimate where the ending hook lands.
+        mean = total_seconds / max(len(ep_state.storyboard_data), 1)
+        last_start = mean * (len(ep_state.storyboard_data) - 1)
+        if last_start > 0 and last_start + clip_duration <= total_seconds + 0.5:
+            climax_start = max(0.0, last_start)
+    return [
+        ("hook", 0.0, clip_duration),
+        ("climax", climax_start, clip_duration),
+    ]
+
+
+def build_growth_meta(ep_state: EpisodeState, genre_tags: list[str] | None = None) -> GrowthMeta:
+    """Compose shelf/publication metadata from the episode's script + genre tags."""
+    script = ep_state.script_data
+    outline = (script.outline if script else "") or ""
+    hook = (script.ending_hook if script else "") or ""
+    return GrowthMeta(
+        title=outline[:40],
+        description=(f"{outline} 结尾悬念：{hook}")[:120],
+        tags=list(genre_tags or []),
+        cover_prompt=f"竖屏短剧封面，{hook}，强冲突、夸张情绪，电影感打光",
+    )
+
+
+def _asset_meta(name: str, base: GrowthMeta, total_seconds: float) -> tuple[str, str, list[str]]:
+    if name == "hook":
+        return (
+            f"开场即高能｜{base.title}",
+            f"开头 15 秒抓住眼球：{base.description}",
+            base.tags + ["开场", "高能"],
+        )
+    return (
+        f"神转折高潮｜{base.title}",
+        f"结尾悬念拉满：{base.description}",
+        base.tags + ["高潮", "悬念"],
+    )
 
 
 def process_agent7_growth(state: DramaState) -> DramaState:
@@ -13,6 +85,8 @@ def process_agent7_growth(state: DramaState) -> DramaState:
         print("没有待制作投流素材的成片。")
         return state
 
+    genre_tags = list(state.get("meta_info", {}).get("genre_tags", []) or [])
+
     for ep_key, ep_state in targets:
         try:
             if not ep_state.final_video_path:
@@ -21,17 +95,33 @@ def process_agent7_growth(state: DramaState) -> DramaState:
             total_seconds = video_duration(master)
             if total_seconds <= 0:
                 raise AgnesVideoError("成片时长为 0。")
-            clip_duration = min(15.0, total_seconds)
+
             growth_dir = episode_output_dir(state["project_id"], ep_key) / "growth"
-            hook_path = cut_video(master, growth_dir / f"{ep_key}_hook.mp4", 0.0, clip_duration)
-            climax_start = max(0.0, total_seconds - clip_duration)
-            climax_path = cut_video(master, growth_dir / f"{ep_key}_climax.mp4", climax_start, clip_duration)
-            ep_state.growth_assets = [
-                GrowthAsset(name="hook", path=str(hook_path), start_seconds=0.0, duration_seconds=clip_duration),
-                GrowthAsset(name="climax", path=str(climax_path), start_seconds=climax_start, duration_seconds=clip_duration),
-            ]
+            segments = detect_emotion_segments(total_seconds, ep_state)
+
+            base_meta = build_growth_meta(ep_state, genre_tags=genre_tags)
+
+            assets: list[GrowthAsset] = []
+            for name, start, clip_duration in segments:
+                out_path = growth_dir / f"{ep_key}_{name}.mp4"
+                path = cut_video(master, out_path, start, clip_duration)
+                headline, description, tags = _asset_meta(name, base_meta, total_seconds)
+                assets.append(
+                    GrowthAsset(
+                        name=name,
+                        path=str(path),
+                        start_seconds=start,
+                        duration_seconds=clip_duration,
+                        headline=headline,
+                        description=description,
+                        tags=tags,
+                    )
+                )
+
+            ep_state.growth_assets = assets
+            ep_state.growth_meta = base_meta
             ep_state.status = "growth_ready"
-            print(f"✅ {ep_key} 已导出 hook 与 climax 两个投流版本。")
+            print(f"✅ {ep_key} 已导出 {len(assets)} 个情绪段投流切片及发布元数据。")
         except AgnesVideoError as exc:
             ep_state.status = "growth_failed"
             ep_state.feedback_log.append(

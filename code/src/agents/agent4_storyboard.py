@@ -5,6 +5,7 @@ from src.text_model import TextModelSettings, create_text_model
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from src.state import DramaState, EpisodeState, ShotStoryboard
+from src.characters import render_character_block
 
 class StoryboardOutput(BaseModel):
     """用于确保 LLM 严格输出列表列表的包装类"""
@@ -62,6 +63,11 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
                 error_message=_escape_template_text(last_error)
             )
             print(f"!! 进入 Recovery 模式 (B计划), 处理反馈: {last_error}")
+
+        # 阶段3：注入角色一致性表，帮助分镜保持角色身份
+        character_block = render_character_block(state.get("characters", []))
+        if character_block:
+            sys_prompt += "\n\n" + character_block
         
         sys_prompt += "\n\n" + parser.get_format_instructions().replace("{", "{{").replace("}", "}}")
         

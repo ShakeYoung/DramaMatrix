@@ -1,0 +1,17 @@
+# DramaMatrix pinned runtime dependencies (阶段4 / T11).
+#
+# This lockfile pins the top-level runtime deps for reproducibility. The
+# project intentionally avoids a full transitive freeze (which diverges across
+# local/server environments); CI and local dev install from requirements.txt,
+# whose ranges include these pinned versions.
+#
+# Regenerate with:
+#   python -c "import importlib.metadata as m; [print(f'{p}=={m.version(p)}') for p in [...]]"
+
+beautifulsoup4==4.13.5
+langchain-openai==0.3.35
+langgraph==0.6.11
+langchain-core==0.3.86
+pydantic==2.10.5
+python-dotenv==1.1.0
+requests==2.32.5

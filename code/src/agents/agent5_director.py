@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import logging
 from pathlib import Path
 
+from src.cost_tracker import CostTracker
 from src.agnes_video import (
     AgnesConfigurationError,
     AgnesContentPolicyViolation,
@@ -14,6 +16,7 @@ from src.agnes_video import (
     AgnesVideoError,
     AgnesVideoSettings,
     episode_output_dir,
+    frames_for_duration,
     safe_component,
 )
 from src.state import DramaState, EpisodeState, FeedbackLog, GeneratedVideoAsset, ShotStoryboard
@@ -27,9 +30,10 @@ NEGATIVE_PROMPT = (
 )
 
 
-def build_agnes_prompt(shot: ShotStoryboard) -> str:
+def build_agnes_prompt(shot: ShotStoryboard, character_block: str = "") -> str:
     """Keep all narrative and production details in the documented text prompt field."""
     dialogue = shot.dialogue.strip() or "No spoken dialogue."
+    consistency = ("\n\n" + character_block) if character_block else ""
     return (
         f"{shot.visual_prompt.strip()}\n"
         f"Camera direction: {shot.camera.strip()}.\n"
@@ -37,6 +41,7 @@ def build_agnes_prompt(shot: ShotStoryboard) -> str:
         f"Audio and atmosphere direction: {shot.audio.strip()}.\n"
         "Maintain character identity, costume, lighting continuity, physically plausible motion, "
         "and a stable cinematic composition."
+        f"{consistency}"
     )
 
 
@@ -69,6 +74,7 @@ def _render_episode(
     ep_state: EpisodeState,
     client: AgnesVideoClient,
     settings: AgnesVideoSettings,
+    tracker: CostTracker,
 ) -> None:
     if len(ep_state.feedback_log) >= settings.max_revisions:
         ep_state.status = "render_failed"
@@ -85,6 +91,9 @@ def _render_episode(
 
     is_resume = ep_state.status in {"rendering", "render_pending"} or bool(ep_state.video_assets)
     ep_state.status = "rendering"
+    # 阶段3：角色一致性块注入每镜 Agnes 提示
+    from src.characters import render_character_block
+    character_block = render_character_block(state.get("characters", []))
     if not is_resume:
         ep_state.video_assets = []
     assets_by_shot = {asset.shot_id: asset for asset in ep_state.video_assets}
@@ -93,7 +102,7 @@ def _render_episode(
     print(f"-> {ep_key}: {action} {len(shots)} 个 Agnes 视频任务。")
 
     for index, shot in enumerate(shots, start=1):
-        prompt = build_agnes_prompt(shot)
+        prompt = build_agnes_prompt(shot, character_block)
         asset = assets_by_shot.get(shot.shot_id)
         if asset and asset.local_path and Path(asset.local_path).is_file():
             asset.status = "completed"
@@ -104,6 +113,11 @@ def _render_episode(
                 task_id = asset.task_id or asset.video_id
                 print(f"   [{ep_key}/{shot.shot_id}] 恢复 Agnes 任务: {task_id}")
             else:
+                if tracker.budget_exhausted():
+                    ep_state.status = "render_pending"
+                    _checkpoint(state, ep_key, ep_state)
+                    print(f"⚠️ {ep_key} 已达 Agnes 创建次数预算上限（{tracker.max_creates}），熔断新任务。")
+                    return
                 created = client.create_video(
                     prompt=prompt,
                     negative_prompt=NEGATIVE_PROMPT,
@@ -113,6 +127,15 @@ def _render_episode(
                 created_video_id = created.get("video_id")
                 video_id = str(created_video_id or created.get("task_id") or created["id"])
                 task_id = str(created.get("task_id") or created.get("id") or video_id)
+                tracker.record_create(
+                    project_id=state["project_id"],
+                    ep_key=ep_key,
+                    shot_id=shot.shot_id,
+                    task_id=task_id,
+                    frames=frames_for_duration(shot.duration, settings.frame_rate),
+                    width=settings.width,
+                    height=settings.height,
+                )
                 asset = GeneratedVideoAsset(
                     shot_id=shot.shot_id,
                     video_id=video_id,
@@ -212,14 +235,19 @@ def process_agent5_director(state: DramaState) -> DramaState:
         print(f"❌ Agnes 连通性熔断：{exc}")
         return state
 
+    tracker = CostTracker.from_environment()
     for ep_key, ep_state in targets:
-        _render_episode(state, ep_key, ep_state, client, settings)
+        _render_episode(state, ep_key, ep_state, client, settings, tracker)
         state["episodes"][ep_key] = ep_state
         if ep_state.status == "director_rejected":
             break
         if ep_state.status in {"render_pending", "render_failed", "submission_uncertain"}:
             # A failed or ambiguous operation must stop later submissions.
             break
+
+    if tracker.records:
+        report = tracker.write_report()
+        print(f"📊 Agnes 用量已记录 {len(tracker.records)} 条 -> {report}")
 
     if any(ep.status == "director_rejected" for _, ep in targets):
         state["system_status"] = "blocked_on_storyboard_revision"

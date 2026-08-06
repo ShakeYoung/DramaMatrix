@@ -1,6 +1,6 @@
 import os
 from dotenv import load_dotenv
-from src.db import db_get_project_state_snapshot, db_save_project_state
+from src.db import db_get_project_state_snapshot, db_insert_run_log, db_save_project_state
 from src.graph import build_drama_matrix_graph
 from src.agnes_video import AgnesVideoClient, AgnesVideoError, AgnesVideoSettings
 from src.network import configure_proxy_environment
@@ -16,8 +16,10 @@ def main(argv=None):
     configure_proxy_environment()
     apply_runtime_options(parse_runtime_options(argv))
     if not os.getenv("AGNES_API_KEY"):
-        print("⚠️ 未检测到 AGNES_API_KEY。请在 .env 中配置后再运行真实视频生产流程。")
-        return 2
+        # 不再硬阻塞：允许纯文本阶段（选品/立项/编剧/分镜）先行运行，
+        # 视频生成阶段 Agent 5 会在缺少密钥时优雅地进入 render_failed。
+        print("⚠️ 未检测到 AGNES_API_KEY。纯文本阶段（选品→分镜）仍可运行；")
+        print("   视频生成阶段（Agent 5）将进入 render_failed，需配置密钥后重跑。")
     if os.getenv("DRAMAMATRIX_AGNES_PREFLIGHT_ONLY") == "1":
         try:
             AgnesVideoClient(AgnesVideoSettings.from_environment()).preflight()
@@ -49,6 +51,17 @@ def main(argv=None):
         for node_name, updated_state in s.items():
             current_state.update(updated_state)
             db_save_project_state(current_state)
+            # 结构化运行日志（阶段4）
+            try:
+                db_insert_run_log(
+                    project_id=current_state.get("project_id"),
+                    node=node_name,
+                    system_status=current_state.get("system_status"),
+                    cycle=current_state.get("task_cycle"),
+                    event="node_transition",
+                )
+            except Exception:
+                pass
             print(f"\n[状态流转] 当前刚离开节点: {node_name}")
             print(f" -> 当前系统阶段 (system_status): {updated_state.get('system_status')}")
             print("-" * 50)

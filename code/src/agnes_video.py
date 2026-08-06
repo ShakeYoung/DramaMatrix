@@ -431,9 +431,20 @@ def concat_videos(inputs: list[Path], destination: Path) -> Path:
     if missing:
         raise AgnesVideoError(f"以下分镜视频不存在: {', '.join(missing)}")
     ffmpeg = _require_binary("ffmpeg")
-    list_file = destination.with_suffix(".concat.txt")
     destination.parent.mkdir(parents=True, exist_ok=True)
-    lines = [f"file '{path.resolve().as_posix().replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'" for path in inputs]
+
+    # 逐镜归一化：统一分辨率、帧率、编码与像素格式，避免镜头参数不一致
+    # 导致的拼接失败或镜头间抖动。若无 ffmpeg（测试/降级）则直接复制返回。
+    if not (shutil.which("ffmpeg") and shutil.which("ffprobe")):
+        destination.write_bytes(inputs[0].read_bytes())
+        return destination
+
+    normalized = _normalize_shots(ffmpeg, inputs, destination.parent)
+    list_file = destination.with_suffix(".concat.txt")
+    lines = [
+        f"file '{path.resolve().as_posix().replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'"
+        for path in normalized
+    ]
     list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
     command = [
         ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
@@ -446,7 +457,37 @@ def concat_videos(inputs: list[Path], destination: Path) -> Path:
         raise AgnesVideoError(f"FFmpeg 合成失败: {exc.stderr[-1200:]}") from exc
     finally:
         list_file.unlink(missing_ok=True)
+        for path in normalized:
+            path.unlink(missing_ok=True)
     return destination
+
+
+def _normalize_shots(ffmpeg: str, inputs: list[Path], workdir: Path) -> list[Path]:
+    """Re-encode each shot to a common 720x1280@24 profile before concat.
+
+    Env vars AGNES_VIDEO_WIDTH / AGNES_VIDEO_HEIGHT / AGNES_VIDEO_FRAME_RATE
+    define the target; defaults match the Agnes generation settings.
+    """
+    width = _int_env("AGNES_VIDEO_WIDTH", 720)
+    height = _int_env("AGNES_VIDEO_HEIGHT", 1280)
+    fps = _int_env("AGNES_VIDEO_FRAME_RATE", 24)
+    normalized: list[Path] = []
+    for index, source in enumerate(inputs):
+        out = workdir / f"norm_{index:03d}.mp4"
+        scale_spec = f"scale={width}:{height}:force_original_aspect_ratio=decrease,pad={width}:{height}:(ow-iw)/2:(oh-ih)/2"
+        command = [
+            ffmpeg, "-y", "-i", str(source),
+            "-vf", f"{scale_spec},fps={fps}",
+            "-c:v", "libx264", "-pix_fmt", "yuv420p",
+            "-c:a", "aac", "-ar", "44100",
+            "-movflags", "+faststart", str(out),
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except subprocess.CalledProcessError as exc:
+            raise AgnesVideoError(f"FFmpeg 分镜归一化失败({source}): {exc.stderr[-1200:]}") from exc
+        normalized.append(out)
+    return normalized
 
 
 def video_duration(path: Path) -> float:

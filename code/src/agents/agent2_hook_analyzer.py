@@ -2,6 +2,7 @@
 from pydantic import BaseModel, Field
 from src.state import DramaState, EvaluationReport
 from src.text_model import TextModelSettings, create_text_model
+from src.db import db_mark_novel_processed
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
@@ -110,6 +111,14 @@ def process_agent2_hook_analyzer(state: DramaState) -> DramaState:
         state["system_status"] = "script_drafting"
     else:
         print(f"❌ 剧本评估未通过: {report.feedback}")
+        # 被否的书标记为 failed，Agent 1 换书重试时会跳过它
+        source_title = state.get("meta_info", {}).get("source_title")
+        if source_title:
+            try:
+                db_mark_novel_processed(source_title, "failed")
+                print(f"   《{source_title}》已标记为 failed，后续换书将跳过。")
+            except Exception as e:
+                print(f"   ⚠️ 标记 {source_title} 为 failed 失败：{e}")
         state["system_status"] = "rejected_by_evaluator"
         
     return state
