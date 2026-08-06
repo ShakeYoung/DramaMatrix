@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+import os
 from pathlib import Path
 
 from src.cost_tracker import CostTracker
@@ -18,6 +19,7 @@ from src.agnes_video import (
     episode_output_dir,
     frames_for_duration,
     safe_component,
+    shot_output_dir,
 )
 from src.state import DramaState, EpisodeState, FeedbackLog, GeneratedVideoAsset, ShotStoryboard
 from src.db import db_save_project_state
@@ -93,19 +95,34 @@ def _render_episode(
     ep_state.status = "rendering"
     # 阶段3：角色一致性块注入每镜 Agnes 提示
     from src.characters import render_character_block
+    from src.continuity import (
+        conditional_generation_enabled,
+        prepare_shot_reference,
+        scene_seed,
+    )
+    from src.continuity_qc import get_checker
+    from src.agnes_video import extract_last_frame
     character_block = render_character_block(state.get("characters", []))
+    conditional = conditional_generation_enabled()
+    scene_references: dict[str, str] = {}  # scene_id -> reference image_url (P1-C)
     if not is_resume:
         ep_state.video_assets = []
     assets_by_shot = {asset.shot_id: asset for asset in ep_state.video_assets}
-    shot_directory = episode_output_dir(state["project_id"], ep_key) / "shots"
-    action = "恢复轮询/下载" if is_resume else "逐镜提交"
+    shot_directory = shot_output_dir(state["project_id"], ep_key, ep_state.storyboard_version or 1)
+    action = ("条件链式生成" if conditional else "恢复轮询/下载" if is_resume else "逐镜提交")
     print(f"-> {ep_key}: {action} {len(shots)} 个 Agnes 视频任务。")
 
+    previous_last_frame: str | None = None  # path/url of previous shot's tail frame
     for index, shot in enumerate(shots, start=1):
         prompt = build_agnes_prompt(shot, character_block)
         asset = assets_by_shot.get(shot.shot_id)
         if asset and asset.local_path and Path(asset.local_path).is_file():
             asset.status = "completed"
+            # When chaining, prime the next shot's first-frame from this completed shot.
+            if conditional and asset.local_path:
+                frame_path = shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}_tail.png"
+                extracted = extract_last_frame(Path(asset.local_path), frame_path)
+                previous_last_frame = str(extracted) if extracted else previous_last_frame
             continue
         try:
             if asset and (asset.video_id or asset.task_id):
@@ -118,12 +135,18 @@ def _render_episode(
                     _checkpoint(state, ep_key, ep_state)
                     print(f"⚠️ {ep_key} 已达 Agnes 创建次数预算上限（{tracker.max_creates}），熔断新任务。")
                     return
-                created = client.create_video(
+                # P1-C：条件输入。同场景首镜用场景参考图；后续镜用上一镜尾帧。
+                create_kwargs = dict(
                     prompt=prompt,
                     negative_prompt=NEGATIVE_PROMPT,
                     duration=shot.duration,
-                    seed=20260801 + index,
+                    seed=scene_seed(20260801, shot.scene_id, index) if conditional else 20260801 + index,
                 )
+                if conditional:
+                    ref = prepare_shot_reference(shot, scene_references, previous_last_frame)
+                    if ref.get("image_url"):
+                        create_kwargs["image_url"] = ref["image_url"]
+                created = client.create_video(**create_kwargs)
                 created_video_id = created.get("video_id")
                 video_id = str(created_video_id or created.get("task_id") or created["id"])
                 task_id = str(created.get("task_id") or created.get("id") or video_id)
@@ -162,6 +185,28 @@ def _render_episode(
             asset.status = "completed"
             asset.local_path = str(local_path)
             _checkpoint(state, ep_key, ep_state)
+            # P1-C：链式生成——下载完成后提取尾帧，供下一镜作为首帧。
+            if conditional:
+                frame_path = shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}_tail.png"
+                extracted = extract_last_frame(Path(local_path), frame_path)
+                previous_last_frame = str(extracted) if extracted else previous_last_frame
+            # P2-A：逐镜质检。不合格只重绘当前镜（受 max_revisions 约束），不等全部生成。
+            qc_result = get_checker().check(
+                prev_video=None,
+                prev_last_frame=Path(previous_last_frame) if previous_last_frame else None,
+                curr_video=Path(local_path),
+                shot=shot,
+            )
+            if not qc_result.passed:
+                _reject_episode(
+                    ep_key,
+                    ep_state,
+                    f"镜头 {shot.shot_id} 连续性质检未通过：{'；'.join(qc_result.issues)}",
+                )
+                _checkpoint(state, ep_key, ep_state)
+                return
+            if qc_result.issues:
+                print(f"   [{ep_key}/{shot.shot_id}] 质检告警：{'；'.join(qc_result.issues)}")
         except AgnesSubmissionUncertain as exc:
             ep_state.status = "submission_uncertain"
             _checkpoint(state, ep_key, ep_state)
@@ -201,6 +246,13 @@ def process_agent5_director(state: DramaState) -> DramaState:
     if any(ep.status == "submission_uncertain" for ep in state["episodes"].values()):
         state["system_status"] = "blocked_on_agnes_submission_uncertain"
         print("❌ 检测到结果未知的历史提交，已熔断所有新任务；请先在 Agnes 控制台核对。")
+        return state
+    # P0-B 门禁：角色圣经为空时禁止正式渲染，避免无一致性约束的盲渲染。
+    allow_no_characters = os.getenv("DRAMAMATRIX_ALLOW_NO_CHARACTERS", "0").strip().lower() in {"1", "true", "yes"}
+    if not state.get("characters") and not allow_no_characters:
+        state["system_status"] = "blocked_on_missing_character_bible"
+        print("❌ 角色圣经为空，已禁止渲染。请确认 Agent 3 已生成角色圣经，")
+        print("   或设置 DRAMAMATRIX_ALLOW_NO_CHARACTERS=1 强制放行（不推荐，将丧失角色一致性）。")
         return state
     targets = [
         (key, ep)

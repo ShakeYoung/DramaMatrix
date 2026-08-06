@@ -48,6 +48,8 @@ class EndToEndSmokeTests(unittest.TestCase):
         os.environ["DRAMAMATRIX_MAX_CYCLES"] = "2"
         os.environ["DRAMAMATRIX_RESUME"] = "0"
         os.environ["DRAMAMATRIX_MAX_SCOUT_ATTEMPTS"] = "3"
+        # This smoke exercises the market loop, not character enforcement.
+        os.environ["DRAMAMATRIX_ALLOW_NO_CHARACTERS"] = "1"
 
         tmp = tempfile.mkdtemp()
         os.environ["DRAMAMATRIX_OUTPUT_DIR"] = os.path.join(tmp, "out")

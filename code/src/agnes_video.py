@@ -150,6 +150,33 @@ def episode_output_dir(project_id: str, episode_id: str) -> Path:
     return directory
 
 
+def shot_output_dir(project_id: str, episode_id: str, version: int = 1) -> Path:
+    """Directory for a specific storyboard version's rendered shots.
+
+    Versioning (P0-A) isolates shots from different storyboard rewrites so that
+    a recovery rewrite does not mix new shots with stale s01..s09 files.
+    """
+    base = episode_output_dir(project_id, episode_id) / "shots"
+    directory = base / f"v{max(1, int(version))}"
+    directory.mkdir(parents=True, exist_ok=True)
+    return directory
+
+
+def purge_shot_versions_except(project_id: str, episode_id: str, keep_version: int) -> None:
+    """Delete every shots/v{N} directory except the one to keep (P0-A).
+
+    Called on storyboard recovery so that 'clear video_assets in state' is
+    aligned with 'clear stale files on disk' — no old/new shot mixing.
+    """
+    base = episode_output_dir(project_id, episode_id) / "shots"
+    if not base.is_dir():
+        return
+    keep = f"v{max(1, int(keep_version))}"
+    for child in base.iterdir():
+        if child.is_dir() and child.name.startswith("v") and child.name != keep:
+            shutil.rmtree(child, ignore_errors=True)
+
+
 def frames_for_duration(duration: str, frame_rate: int) -> int:
     """Convert a storyboard duration to a valid Agnes 8n+1 frame count."""
     match = re.search(r"\d+(?:\.\d+)?", duration or "")
@@ -325,6 +352,10 @@ class AgnesVideoClient:
         negative_prompt: str,
         duration: str,
         seed: int,
+        image: Optional[str] = None,
+        image_url: Optional[str] = None,
+        last_frame: Optional[str] = None,
+        last_frame_url: Optional[str] = None,
     ) -> dict[str, Any]:
         payload = {
             "model": self.settings.model,
@@ -336,6 +367,20 @@ class AgnesVideoClient:
             "frame_rate": self.settings.frame_rate,
             "seed": seed,
         }
+        # P1-B：首帧/参考图与关键帧尾帧条件输入（OpenAI 兼容假设，字段名可配）。
+        # 仅当传值时注入；字段名经 env 可配置，便于服务器端按真实接口联调校准。
+        image_field = os.getenv("AGNES_IMAGE_FIELD", "image")
+        image_url_field = os.getenv("AGNES_IMAGE_URL_FIELD", "image_url")
+        last_frame_field = os.getenv("AGNES_LAST_FRAME_FIELD", "last_frame")
+        last_frame_url_field = os.getenv("AGNES_LAST_FRAME_URL_FIELD", "last_frame_url")
+        if image:
+            payload[image_field] = image
+        if image_url:
+            payload[image_url_field] = image_url
+        if last_frame:
+            payload[last_frame_field] = last_frame
+        if last_frame_url:
+            payload[last_frame_url_field] = last_frame_url
         result = self._request_json(
             "POST", f"{self.settings.base_url}/videos", payload, stage="create"
         )
@@ -441,6 +486,49 @@ def _require_binary(name: str) -> str:
     return path
 
 
+def trim_unstable_frames(path: Path, workdir: Path, head: Optional[int] = None, tail: Optional[int] = None) -> Path:
+    """Trim unstable head/tail frames from a shot (P2-B).
+
+    AI-generated clips often have jittery first/last frames; cropping them per
+    shot before concat avoids wobble at cut points. head/tail default to env
+    DRAMAMATRIX_TRIM_HEAD / DRAMAMATRIX_TRIM_TAIL (default 0 = no trim, so the
+    behavior is unchanged unless explicitly enabled). Without ffmpeg the input
+    is returned unchanged.
+    """
+    head = int(os.getenv("DRAMAMATRIX_TRIM_HEAD", "0")) if head is None else head
+    tail = int(os.getenv("DRAMAMATRIX_TRIM_TAIL", "0")) if tail is None else tail
+    if head <= 0 and tail <= 0:
+        return path
+    try:
+        ffmpeg = _require_binary("ffmpeg")
+        ffprobe = _require_binary("ffprobe")
+    except AgnesConfigurationError:
+        return path
+    # Read fps to convert frame counts to seconds.
+    try:
+        probe = subprocess.run(
+            [ffprobe, "-v", "error", "-select_streams", "v:0", "-show_entries", "stream=r_frame_rate",
+             "-of", "default=noprint_wrappers=1:nokey=1", str(path)],
+            check=True, capture_output=True, text=True,
+        )
+        frac = probe.stdout.strip().split("/")
+        fps = float(frac[0]) / float(frac[1]) if len(frac) == 2 and float(frac[1]) else 24.0
+    except (subprocess.CalledProcessError, ValueError, ZeroDivisionError):
+        fps = 24.0
+    start = head / fps
+    out = workdir / f"trim_{path.name}"
+    command = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-i", str(path)]
+    if tail > 0:
+        # -sseof-style tail trim via tduration; approximate by trimming tail seconds.
+        command += ["-t", f"max(0, duration-{(head + tail) / fps})"]
+    command += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", str(out)]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError:
+        return path
+    return out if out.is_file() else path
+
+
 def concat_videos(inputs: list[Path], destination: Path) -> Path:
     if not inputs:
         raise AgnesVideoError("没有可合成的视频素材。")
@@ -456,13 +544,16 @@ def concat_videos(inputs: list[Path], destination: Path) -> Path:
         destination.write_bytes(inputs[0].read_bytes())
         return destination
 
-    normalized = _normalize_shots(ffmpeg, inputs, destination.parent)
+    # P2-B：拼接前裁掉每段头尾不稳定帧（默认 0 不裁，可配开启）。
+    trimmed = [trim_unstable_frames(path, destination.parent) for path in inputs]
+    normalized = _normalize_shots(ffmpeg, trimmed, destination.parent)
     list_file = destination.with_suffix(".concat.txt")
     lines = [
         f"file '{path.resolve().as_posix().replace(chr(39), chr(39) + chr(92) + chr(39) + chr(39))}'"
         for path in normalized
     ]
     list_file.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    # P2-B：同场景硬切（concat demuxer 即硬切），不统一加交叉淡化，避免人物漂移时的双脸/重影。
     command = [
         ffmpeg, "-y", "-f", "concat", "-safe", "0", "-i", str(list_file),
         "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac",
@@ -530,3 +621,27 @@ def cut_video(source: Path, destination: Path, start_seconds: float, duration_se
     except subprocess.CalledProcessError as exc:
         raise AgnesVideoError(f"FFmpeg 切片失败: {exc.stderr[-1200:]}") from exc
     return destination
+
+
+def extract_last_frame(video_path: Path, destination: Path) -> Optional[Path]:
+    """Extract the last stable frame of a shot to use as the next shot's first
+    frame (P1-C). Returns None when ffmpeg is unavailable so callers can degrade
+    to plain text-to-video instead of failing the whole episode.
+    """
+    try:
+        ffmpeg = _require_binary("ffmpeg")
+    except AgnesVideoError:
+        return None
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        ffmpeg, "-y", "-sseof", "-0.3", "-i", str(video_path),
+        "-frames:v", "1", "-q:v", "2", str(destination),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        print(f"   ⚠️ 提取尾帧失败，将退回纯文生视频：{exc.stderr[-300:]}")
+        return None
+    if destination.is_file():
+        return destination
+    return None

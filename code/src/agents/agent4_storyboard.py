@@ -6,6 +6,8 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
 from src.state import DramaState, EpisodeState, ShotStoryboard
 from src.characters import render_character_block
+from src.agnes_video import purge_shot_versions_except
+from src.continuity import normalize_continuity
 
 class StoryboardOutput(BaseModel):
     """用于确保 LLM 严格输出列表列表的包装类"""
@@ -63,6 +65,16 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
                 error_message=_escape_template_text(last_error)
             )
             print(f"!! 进入 Recovery 模式 (B计划), 处理反馈: {last_error}")
+            # P0-A：分镜版本隔离——重写时递增版本号并清掉旧版本镜头目录，
+            # 避免状态里 video_assets=[] 但磁盘残留旧 s01~s09 造成新旧混用。
+            ep_state.storyboard_version = int(ep_state.storyboard_version or 1) + 1
+            try:
+                purge_shot_versions_except(
+                    state["project_id"], ep_key, ep_state.storyboard_version
+                )
+                print(f"   已清理旧版本镜头目录，本次渲染写入 shots/v{ep_state.storyboard_version}/")
+            except Exception as exc:
+                print(f"   ⚠️ 清理旧版本镜头目录失败：{exc}")
 
         # 阶段3：注入角色一致性表，帮助分镜保持角色身份
         character_block = render_character_block(state.get("characters", []))
@@ -120,7 +132,15 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
             ep_state.final_video_path = None
             ep_state.growth_assets = []
             ep_state.status = "storyboard_done"
-            
+
+        # P1-A：连续性归一化（软约束）——对齐相邻镜边界状态、回填 scene_id，
+        # 收集 continuity_warnings 而非硬失败。
+        warnings = normalize_continuity(ep_state.storyboard_data)
+        if warnings:
+            print(f"   ⚠️ 连续性告警 {len(warnings)} 条（已自动归一化）：")
+            for w in warnings[:5]:
+                print(f"      - {w.shot_id}.{w.field}: {w.message}")
+
         state["episodes"][ep_key] = ep_state
     
     return state

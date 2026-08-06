@@ -3,6 +3,15 @@ from pydantic import BaseModel, Field
 
 # ----------------- Sub-models for the specific agent tasks -----------------
 
+class ShotBoundaryState(BaseModel):
+    """镜头边界姿态/位置/光线状态（P1-A），用于强制前后镜衔接。"""
+    pose: str = Field(default="", description="人物姿态，如'站立背对镜头'")
+    subject_position: str = Field(default="", description="主体在画面中的位置，如'画面中央偏左'")
+    gaze_direction: str = Field(default="", description="视线方向，如'看向镜头右侧'")
+    light_direction: str = Field(default="", description="主光方向，如'顶光/侧逆光'")
+    color_temperature: str = Field(default="", description="色温，如'暖黄 3200K'")
+
+
 class ShotStoryboard(BaseModel):
     """单镜头分镜数据模型 (Data model for a single shot storyboard)"""
     shot_id: str = Field(description="镜头编号, e.g., 's1_01'")
@@ -11,6 +20,23 @@ class ShotStoryboard(BaseModel):
     dialogue: str = Field(description="角色台词 (Dialogue)")
     duration: str = Field(description="镜头持续时间，推荐 3s ~ 5s (Duration)")
     audio: str = Field(description="音效与配乐暗示 (Audio hints)")
+    # P1-A：连续性字段（全部 Optional，旧快照可平滑恢复）
+    scene_id: Optional[str] = Field(default=None, description="场景编号，同场景共用参考图与 seed")
+    location_id: Optional[str] = Field(default=None, description="地点编号")
+    wardrobe_ids: List[str] = Field(default_factory=list, description="本镜出场角色的服装编号")
+    time_of_day: Optional[str] = Field(default=None, description="时段：日/夜/黄昏")
+    weather: Optional[str] = Field(default=None, description="天气")
+    light_direction: Optional[str] = Field(default=None, description="主光方向")
+    color_temperature: Optional[str] = Field(default=None, description="色温")
+    start_pose: Optional[str] = Field(default=None, description="起始姿态")
+    end_pose: Optional[str] = Field(default=None, description="结束姿态")
+    subject_position: Optional[str] = Field(default=None, description="主体画面位置")
+    gaze_direction: Optional[str] = Field(default=None, description="视线方向")
+    motion_direction: Optional[str] = Field(default=None, description="运动方向")
+    previous_shot_id: Optional[str] = Field(default=None, description="上一镜编号")
+    transition_type: Optional[str] = Field(default=None, description="计划转场：hard_cut/crossfade/flash")
+    start_state: Optional[ShotBoundaryState] = Field(default=None, description="起始边界状态")
+    end_state: Optional[ShotBoundaryState] = Field(default=None, description="结束边界状态")
 
 class EpisodeScriptData(BaseModel):
     """单集剧本大纲数据模型"""
@@ -25,6 +51,10 @@ class CharacterSheet(BaseModel):
     appearance: str = Field(description="外形与服化描述，例如'红衣黑发青年，佩戴玉坠'")
     signature: str = Field(description="标志性特征/口头禅，用于稳定身份")
     role: str = Field(default="", description="角色定位，如'男主/女主/反派'")
+    # P0-B：角色圣经补充字段
+    wardrobe_id: str = Field(default="", description="服装编号，便于跨镜服化锁定")
+    reference_image_prompt: str = Field(default="", description="生成该角色参考图的提示词")
+    appears_in: List[str] = Field(default_factory=list, description="出场集号列表，如 ['ep_01','ep_02']")
 
 class EvaluationReport(BaseModel):
     """小说爆点评估与可行性报告 (Agent 2)"""
@@ -102,6 +132,8 @@ class EpisodeState(BaseModel):
     subtitle_track: Optional[str] = Field(default=None)
     # 投流发布元数据（Agent 7）
     growth_meta: Optional[GrowthMeta] = Field(default=None)
+    # 分镜版本（P0-A）：recovery 重写时递增，隔离新旧镜头文件
+    storyboard_version: int = Field(default=1)
 
 
 class MarketFeedback(BaseModel):

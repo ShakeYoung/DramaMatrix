@@ -2,7 +2,6 @@
 from pydantic import BaseModel, Field
 from typing import List
 from src.state import DramaState, EpisodeState, EpisodeScriptData
-from src.characters import extract_characters
 from src.text_model import TextModelSettings, create_text_model
 
 from langchain_core.prompts import ChatPromptTemplate
@@ -110,10 +109,17 @@ def process_agent3_head_writer(state: DramaState) -> DramaState:
         print("✅ 使用内建兜底方案生成了全剧拆解与前两集大纲。")
 
     state["system_status"] = "ready_for_storyboard"
-    # 阶段3：从剧本/素材抽取角色一致性表，供分镜与视频生成沿用
-    state["characters"] = extract_characters(
-        state.get("source_material", {}).get("raw_text", ""),
-        fallback=[],
+    # P0-B：从总纲/各集大纲/原文多源生成角色圣经，供分镜与视频生成沿用。
+    # 旧的 extract_characters 只认"某某说/道"，叙述型原文会得到空表。
+    from src.characters import build_character_bible, characters_for_episode
+
+    state["characters"] = build_character_bible(
+        script_outline=state.get("master_script_outline", ""),
+        episodes=list(state.get("episodes", {}).values()),
+        raw_text=state.get("source_material", {}).get("raw_text", ""),
     )
-    print(f"-> 抽取角色表：{len(state['characters'])} 个角色。")
+    # 派生各集出场角色子集
+    for ep_key, ep_state in state.get("episodes", {}).items():
+        ep_state.characters = characters_for_episode(state["characters"], ep_key)
+    print(f"-> 生成角色圣经：{len(state['characters'])} 个角色。")
     return state

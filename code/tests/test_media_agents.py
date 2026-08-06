@@ -1,3 +1,4 @@
+import os
 import tempfile
 import unittest
 from pathlib import Path
@@ -43,6 +44,14 @@ def make_state():
 
 
 class MediaAgentTests(unittest.TestCase):
+    def setUp(self):
+        # These tests exercise render mechanics (resume/uncertain/preflight),
+        # not character enforcement; bypass the empty-bible gate (P0-B).
+        os.environ["DRAMAMATRIX_ALLOW_NO_CHARACTERS"] = "1"
+
+    def tearDown(self):
+        os.environ.pop("DRAMAMATRIX_ALLOW_NO_CHARACTERS", None)
+
     def test_preflight_failure_blocks_all_create_requests(self):
         state = make_state()
         state["episodes"]["ep_02"] = state["episodes"]["ep_01"].model_copy(deep=True)
