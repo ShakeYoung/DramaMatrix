@@ -65,8 +65,18 @@ def process_agent3_head_writer(state: DramaState) -> DramaState:
         print(result.master_script_outline)
         print("===================================================\n")
         
+        # P1-4：总镜头预算门禁，避免一次规划过多集导致成本与失败面过大。
+        # 每集约需 min_shots 个镜头，按预算反推可规划的集数上限。
+        import os
+        total_budget = int(os.getenv("DRAMAMATRIX_MAX_TOTAL_SHOTS", "120"))
+        min_shots_per_ep = int(os.getenv("DRAMAMATRIX_MIN_SHOTS_PER_EPISODE", "12"))
+        ep_cap = max(1, total_budget // max(min_shots_per_ep, 1))
+        planned_episodes = result.episodes[:ep_cap]
+        if len(result.episodes) > ep_cap:
+            print(f"   ⚠️ 总镜头预算 {total_budget}：原计划 {len(result.episodes)} 集，截断为前 {ep_cap} 集。")
+
         # Populate Episodes into DramaState
-        for ep in result.episodes:
+        for ep in planned_episodes:
             # Type cast to EpisodeScriptData for correct Model validation
             script_data = EpisodeScriptData(
                 ep_id=ep.ep_id,

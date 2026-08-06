@@ -92,7 +92,40 @@ def normalize_continuity(
     last.previous_shot_id = shots[-2].shot_id if len(shots) > 1 else None
     if last.end_state is None:
         last.end_state = (last.start_state or _boundary_from_shot(last)).model_copy()
+    # P1-1：把连续性事实回写到 visual_prompt，让生成模型真正看到，
+    # 而非只改 JSON 状态（否则归一化对生成结果无影响）。
+    for shot in shots:
+        write_continuity_into_prompt(shot)
     return warnings
+
+
+def write_continuity_into_prompt(shot: ShotStoryboard) -> None:
+    """Append continuity facts (scene/light/wardrobe/pose) to visual_prompt (P1-1).
+
+    Idempotent: skips appending if a continuity marker is already present, so
+    repeated normalization passes don't bloat the prompt.
+    """
+    marker = "[continuity]"
+    if marker in (shot.visual_prompt or ""):
+        return
+    facts: list[str] = []
+    if shot.scene_id:
+        facts.append(f"scene={shot.scene_id}")
+    if shot.wardrobe_ids:
+        facts.append(f"wardrobe={','.join(shot.wardrobe_ids)}")
+    if shot.time_of_day:
+        facts.append(f"time={shot.time_of_day}")
+    if shot.light_direction or (shot.start_state and shot.start_state.light_direction):
+        light = shot.light_direction or shot.start_state.light_direction
+        facts.append(f"light={light}")
+    if shot.color_temperature or (shot.start_state and shot.start_state.color_temperature):
+        ct = shot.color_temperature or shot.start_state.color_temperature
+        facts.append(f"color_temp={ct}")
+    if shot.start_state and shot.start_state.pose:
+        facts.append(f"start_pose={shot.start_state.pose}")
+    if not facts:
+        return
+    shot.visual_prompt = (shot.visual_prompt or "").rstrip() + f" {marker} " + "; ".join(facts)
 
 
 def conditional_generation_enabled() -> bool:

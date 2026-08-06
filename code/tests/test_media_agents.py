@@ -69,8 +69,11 @@ class MediaAgentTests(unittest.TestCase):
 
         client.create_video.assert_not_called()
         self.assertEqual(state["system_status"], "blocked_on_agnes_connectivity")
+        # P0-3: a transient connectivity failure must NOT mass-mark unstarted
+        # episodes as render_failed; they become waiting_for_connectivity so the
+        # next run can resume without losing them.
         self.assertTrue(
-            all(ep.status == "render_failed" for ep in state["episodes"].values())
+            all(ep.status == "waiting_for_connectivity" for ep in state["episodes"].values())
         )
 
     def test_uncertain_submission_stops_later_episodes(self):
@@ -258,7 +261,9 @@ class MediaAgentTests(unittest.TestCase):
             )
         ]
 
-        with patch("src.agents.agent4_storyboard.create_text_model", side_effect=RuntimeError("no model")):
+        with patch("src.agents.agent4_storyboard.create_text_model", side_effect=RuntimeError("no model")), patch.dict(
+            os.environ, {"DRAMAMATRIX_ALLOW_MOCK_STORYBOARD": "1"}, clear=False
+        ):
             process_agent4_storyboard(state)
 
         self.assertEqual(episode.status, "storyboard_done")

@@ -50,6 +50,8 @@ class EndToEndSmokeTests(unittest.TestCase):
         os.environ["DRAMAMATRIX_MAX_SCOUT_ATTEMPTS"] = "3"
         # This smoke exercises the market loop, not character enforcement.
         os.environ["DRAMAMATRIX_ALLOW_NO_CHARACTERS"] = "1"
+        # Allow Agent4 mock fallback so the text-model-less smoke can produce shots.
+        os.environ["DRAMAMATRIX_ALLOW_MOCK_STORYBOARD"] = "1"
 
         tmp = tempfile.mkdtemp()
         os.environ["DRAMAMATRIX_OUTPUT_DIR"] = os.path.join(tmp, "out")

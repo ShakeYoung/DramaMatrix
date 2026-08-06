@@ -6,11 +6,14 @@ import logging
 import os
 from pathlib import Path
 
+import requests.exceptions as requests_exceptions
+
 from src.cost_tracker import CostTracker
 from src.agnes_video import (
     AgnesConfigurationError,
-    AgnesContentPolicyViolation,
     AgnesConnectionError,
+    AgnesContentPolicyViolation,
+    AgnesQueueFull,
     AgnesSubmissionUncertain,
     AgnesTaskFailed,
     AgnesVideoClient,
@@ -101,7 +104,7 @@ def _render_episode(
         scene_seed,
     )
     from src.continuity_qc import get_checker
-    from src.agnes_video import extract_last_frame
+    from src.agnes_video import extract_last_frame, frame_to_data_uri
     character_block = render_character_block(state.get("characters", []))
     conditional = conditional_generation_enabled()
     scene_references: dict[str, str] = {}  # scene_id -> reference image_url (P1-C)
@@ -112,8 +115,13 @@ def _render_episode(
     action = ("条件链式生成" if conditional else "恢复轮询/下载" if is_resume else "逐镜提交")
     print(f"-> {ep_key}: {action} {len(shots)} 个 Agnes 视频任务。")
 
-    previous_last_frame: str | None = None  # path/url of previous shot's tail frame
+    previous_last_frame: str | None = None  # data URI / url of previous shot's tail frame
+    previous_scene_id: str | None = None
     for index, shot in enumerate(shots, start=1):
+        # P0-5：场景切换时清除上一场景尾帧，避免跨场景错误继承。
+        if previous_scene_id is not None and shot.scene_id != previous_scene_id:
+            previous_last_frame = None
+        previous_scene_id = shot.scene_id
         prompt = build_agnes_prompt(shot, character_block)
         asset = assets_by_shot.get(shot.shot_id)
         if asset and asset.local_path and Path(asset.local_path).is_file():
@@ -121,8 +129,11 @@ def _render_episode(
             # When chaining, prime the next shot's first-frame from this completed shot.
             if conditional and asset.local_path:
                 frame_path = shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}_tail.png"
-                extracted = extract_last_frame(Path(asset.local_path), frame_path)
-                previous_last_frame = str(extracted) if extracted else previous_last_frame
+                # P1-3：已存在且非空的尾帧不重复提取，避免恢复时 O(n²) 抽帧。
+                if not frame_path.is_file() or frame_path.stat().st_size == 0:
+                    extract_last_frame(Path(asset.local_path), frame_path)
+                data_uri = frame_to_data_uri(frame_path)
+                previous_last_frame = data_uri if data_uri else previous_last_frame
             continue
         try:
             if asset and (asset.video_id or asset.task_id):
@@ -188,8 +199,10 @@ def _render_episode(
             # P1-C：链式生成——下载完成后提取尾帧，供下一镜作为首帧。
             if conditional:
                 frame_path = shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}_tail.png"
-                extracted = extract_last_frame(Path(local_path), frame_path)
-                previous_last_frame = str(extracted) if extracted else previous_last_frame
+                if not frame_path.is_file() or frame_path.stat().st_size == 0:
+                    extract_last_frame(Path(local_path), frame_path)
+                data_uri = frame_to_data_uri(frame_path)
+                previous_last_frame = data_uri if data_uri else previous_last_frame
             # P2-A：逐镜质检。不合格只重绘当前镜（受 max_revisions 约束），不等全部生成。
             qc_result = get_checker().check(
                 prev_video=None,
@@ -211,6 +224,20 @@ def _render_episode(
             ep_state.status = "submission_uncertain"
             _checkpoint(state, ep_key, ep_state)
             print(f"❌ {ep_key}/{shot.shot_id} 提交状态未知，已熔断后续创建：{exc}")
+            return
+        except AgnesQueueFull as exc:
+            # P0-1/P0-2：队列满/限流是可恢复的——只暂停当前集，等待后重试当前镜，
+            # 不标记 render_failed，也不让其他集立即重入。
+            ep_state.status = "waiting_for_agnes_capacity"
+            _checkpoint(state, ep_key, ep_state)
+            print(f"⏸️ {ep_key}/{shot.shot_id} Agnes 队列满，暂停等待容量后重试当前镜：{exc}")
+            return
+        except (AgnesConnectionError, requests_exceptions.ChunkedEncodingError) as exc:
+            # P0-3：瞬时连接失败不应把剩余剧集批量判 render_failed。
+            # 仅把当前正在处理的集标记为 waiting_for_connectivity，其余保持原状。
+            ep_state.status = "waiting_for_connectivity"
+            _checkpoint(state, ep_key, ep_state)
+            print(f"⏸️ {ep_key} Agnes 连接瞬时失败，标记 waiting_for_connectivity，恢复后继续：{exc}")
             return
         except AgnesContentPolicyViolation as exc:
             _reject_episode(
@@ -257,7 +284,14 @@ def process_agent5_director(state: DramaState) -> DramaState:
     targets = [
         (key, ep)
         for key, ep in state["episodes"].items()
-        if ep.status in {"storyboard_done", "rendering", "render_pending", "render_failed"}
+        if ep.status in {
+            "storyboard_done",
+            "rendering",
+            "render_pending",
+            "render_failed",
+            "waiting_for_agnes_capacity",
+            "waiting_for_connectivity",
+        }
     ]
     if not targets:
         print("没有等待 Agnes 渲染的剧集。")
@@ -277,14 +311,16 @@ def process_agent5_director(state: DramaState) -> DramaState:
     try:
         client.preflight()
     except (AgnesConnectionError, AgnesConfigurationError) as exc:
+        # P0-3：连通性瞬时失败不得把尚未提交的剧集批量判 render_failed。
+        # 仅把正在处理的集转为 waiting_for_connectivity，其余保持原状以便下次恢复。
         for ep_key, ep_state in targets:
             if ep_state.status in {"rendering", "render_pending"}:
                 ep_state.status = "render_pending"
-            elif ep_state.status != "submission_uncertain":
-                ep_state.status = "render_failed"
+            elif ep_state.status not in {"submission_uncertain"}:
+                ep_state.status = "waiting_for_connectivity"
             state["episodes"][ep_key] = ep_state
         state["system_status"] = "blocked_on_agnes_connectivity"
-        print(f"❌ Agnes 连通性熔断：{exc}")
+        print(f"❌ Agnes 连通性熔断（已转为 waiting_for_connectivity，恢复后继续）：{exc}")
         return state
 
     tracker = CostTracker.from_environment()
@@ -293,8 +329,14 @@ def process_agent5_director(state: DramaState) -> DramaState:
         state["episodes"][ep_key] = ep_state
         if ep_state.status == "director_rejected":
             break
-        if ep_state.status in {"render_pending", "render_failed", "submission_uncertain"}:
-            # A failed or ambiguous operation must stop later submissions.
+        if ep_state.status in {
+            "render_pending",
+            "render_failed",
+            "submission_uncertain",
+            "waiting_for_agnes_capacity",
+            "waiting_for_connectivity",
+        }:
+            # A failed/ambiguous/waiting operation must stop later submissions.
             break
 
     if tracker.records:
@@ -305,6 +347,10 @@ def process_agent5_director(state: DramaState) -> DramaState:
         state["system_status"] = "blocked_on_storyboard_revision"
     elif any(ep.status == "submission_uncertain" for _, ep in targets):
         state["system_status"] = "blocked_on_agnes_submission_uncertain"
+    elif any(ep.status == "waiting_for_agnes_capacity" for _, ep in targets):
+        state["system_status"] = "waiting_for_agnes_capacity"
+    elif any(ep.status == "waiting_for_connectivity" for _, ep in targets):
+        state["system_status"] = "waiting_for_connectivity"
     elif any(ep.status in {"render_failed", "render_pending"} for _, ep in targets):
         state["system_status"] = "blocked_on_agnes_render"
     else:

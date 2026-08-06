@@ -72,7 +72,17 @@ def route_from_start(state: DramaState) -> str:
             return END
         if any(ep.status in {"script_done", "director_rejected"} for ep in episodes):
             return "agent4_storyboard"
-        if any(ep.status in {"storyboard_done", "rendering", "render_pending"} for ep in episodes) or _has_retryable_render_failed(episodes):
+        # P0-2/P0-3：恢复运行时，等待中的集重新进入 Agent5 继续轮询/重试当前镜。
+        if any(
+            ep.status in {
+                "storyboard_done",
+                "rendering",
+                "render_pending",
+                "waiting_for_agnes_capacity",
+                "waiting_for_connectivity",
+            }
+            for ep in episodes
+        ) or _has_retryable_render_failed(episodes):
             return "agent5_director"
         if any(ep.status == "video_generated" for ep in episodes):
             return "agent6_editor"
@@ -98,11 +108,18 @@ def route_next_step_for_episode(state: DramaState) -> str:
     if any(ep.status == "director_rejected" for ep in episodes):
         print(">> Router: 检测到 Agnes 渲染反馈，重新路由至 Agent 4")
         return "agent4_storyboard"
+    # P0-4：分镜门禁拦截（数量/LLM 失败）为终态，禁止进入昂贵的视频生成。
+    if any(ep.status == "storyboard_blocked" for ep in episodes):
+        return END
     # A submitted task is intentionally paused after a recoverable network error.
     # The next process start resumes polling it before any new render is submitted.
     if any(ep.status == "render_pending" for ep in episodes):
         return END
     if any(ep.status == "submission_uncertain" for ep in episodes):
+        return END
+    # P0-2：队列满/连接等待是"本次运行暂停、下次进程恢复"的状态，
+    # 绝不能让其他 storyboard_done 集触发 Agent5 无等待重入。
+    if any(ep.status in {"waiting_for_agnes_capacity", "waiting_for_connectivity"} for ep in episodes):
         return END
     if any(ep.status == "storyboard_done" for ep in episodes):
         return "agent5_director"

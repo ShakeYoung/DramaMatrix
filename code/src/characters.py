@@ -156,17 +156,68 @@ def build_character_bible(
         response = llm.invoke([SystemMessage(content=system), HumanMessage(content=context)])
         bible: CharacterBible = parser.invoke(response)
         if bible.characters:
-            return bible.characters
+            return canonicalize_characters(bible.characters)
     except Exception as exc:  # noqa: BLE001 - fallback is intended
         print(f"      [CharacterBible] LLM 生成失败，回退到确定性抽取：{exc}")
 
     # 回退：增强的确定性抽取（叙述型线索）
-    return extract_characters_enhanced(raw_text + "\n" + script_outline)
+    return canonicalize_characters(extract_characters_enhanced(raw_text + "\n" + script_outline))
 
 
 def characters_for_episode(characters: Sequence[CharacterSheet], ep_key: str) -> list[CharacterSheet]:
     """Return the subset of the bible that appears in a given episode."""
     return [ch for ch in characters if not ch.appears_in or ep_key in ch.appears_in]
+
+
+def _edit_distance(a: str, b: str) -> int:
+    """Levenshtein distance for short name strings."""
+    if a == b:
+        return 0
+    la, lb = len(a), len(b)
+    if la == 0:
+        return lb
+    if lb == 0:
+        return la
+    prev = list(range(lb + 1))
+    for i, ca in enumerate(a, 1):
+        cur = [i]
+        for j, cb in enumerate(b, 1):
+            cur.append(min(prev[j] + 1, cur[j - 1] + 1, prev[j - 1] + (ca != cb)))
+        prev = cur
+    return prev[lb]
+
+
+def canonicalize_characters(characters: Sequence[CharacterSheet]) -> list[CharacterSheet]:
+    """Assign stable canonical IDs and merge near-duplicate names (P1-2).
+
+    Fixes drift like "Zhang Ruochen" vs "Zhang Ruocheng" (1-char edit distance)
+    by collapsing them onto one canonical entry with a stable id, so downstream
+    prompts reference a single identity instead of free-text variants.
+    """
+    merged: list[CharacterSheet] = []
+    for ch in characters:
+        canonical = ch
+        for existing in merged:
+            # Same name, or very close transliteration (<=1 char diff, len>=4).
+            if (
+                existing.name == ch.name
+                or (len(ch.name) >= 4 and _edit_distance(existing.name, ch.name) <= 1)
+            ):
+                # Keep the first-seen name as canonical; enrich appearance/desc.
+                if ch.appears_in:
+                    new_appears = list(set(existing.appears_in) | set(ch.appears_in))
+                    existing.appears_in = new_appears
+                if ch.appearance and ch.appearance not in existing.appearance:
+                    existing.appearance = (existing.appearance + "；" + ch.appearance).strip("；")
+                canonical = None
+                break
+        if canonical is not None:
+            merged.append(canonical)
+    # Assign stable canonical IDs.
+    for idx, ch in enumerate(merged, 1):
+        # Store in wardrobe_id's sibling field role-free; reuse signature to carry id.
+        object.__setattr__(ch, "signature", ch.signature or f"char_{idx:02d}")
+    return merged
 
 
 def render_character_block(characters: Sequence[CharacterSheet]) -> str:

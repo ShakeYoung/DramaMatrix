@@ -67,7 +67,12 @@ def main(argv=None):
             print("-" * 50)
             
     db_save_project_state(current_state)
-    print(f"\n==========✅ 最终系统状态: {current_state.get('system_status')} ==========")
+    final_status = current_state.get("system_status", "")
+    print(f"\n==========最终系统状态: {final_status} ==========")
+    # P2-2：终态为 blocked_*/waiting_* 时返回非零退出码，便于调度器/守护进程识别未完成。
+    if final_status.startswith(("blocked_", "waiting_", "failed")):
+        print("⚠️ 流程未正常完成（阻塞/等待/失败），退出码 2。")
+        return 2
     return 0
     
 if __name__ == "__main__":

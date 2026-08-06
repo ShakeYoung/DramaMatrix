@@ -1,13 +1,46 @@
 from typing import List
+import os
+import time
 from pydantic import BaseModel, Field
 from src.text_model import TextModelSettings, create_text_model
 
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import PydanticOutputParser
-from src.state import DramaState, EpisodeState, ShotStoryboard
+from src.state import DramaState, EpisodeState, FeedbackLog, ShotStoryboard
 from src.characters import render_character_block
 from src.agnes_video import purge_shot_versions_except
 from src.continuity import normalize_continuity
+
+
+# P0-4 门禁：单集分镜数量下限/上限，以及生产模式是否允许 mock 兜底。
+def _min_shots() -> int:
+    return int(os.getenv("DRAMAMATRIX_MIN_SHOTS_PER_EPISODE", "12"))
+
+
+def _max_shots() -> int:
+    return int(os.getenv("DRAMAMATRIX_MAX_SHOTS_PER_EPISODE", "30"))
+
+
+def _allow_mock_fallback() -> bool:
+    return os.getenv("DRAMAMATRIX_ALLOW_MOCK_STORYBOARD", "0").strip().lower() in {"1", "true", "yes"}
+
+
+def _invoke_storyboard_with_retry(chain, payload, max_attempts: int = 3):
+    """Invoke the storyboard chain with backoff retries (P0-4).
+
+    5s -> 15s -> 30s. Raises the last exception if all attempts fail.
+    """
+    last_exc = None
+    for attempt in range(1, max_attempts + 1):
+        try:
+            return chain.invoke(payload)
+        except Exception as exc:  # noqa: BLE001 - retry any LLM/transport error
+            last_exc = exc
+            if attempt < max_attempts:
+                delay = 5 * (3 ** (attempt - 1))  # 5, 15, ...
+                print(f"      [Media Agent] 分镜 LLM 第 {attempt}/{max_attempts} 次失败，{delay}s 后重试：{exc}")
+                time.sleep(delay)
+    raise last_exc
 
 class StoryboardOutput(BaseModel):
     """用于确保 LLM 严格输出列表列表的包装类"""
@@ -92,19 +125,40 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
         try:
             llm = create_text_model(temperature=0.7)
             chain = prompt | llm | parser
-            result: StoryboardOutput = chain.invoke({
-                "ep_id": ep_key,
-                "outline": ep_state.script_data.outline,
-                "ending_hook": ep_state.script_data.ending_hook
-            })
-            
+            result: StoryboardOutput = _invoke_storyboard_with_retry(
+                chain,
+                {
+                    "ep_id": ep_key,
+                    "outline": ep_state.script_data.outline,
+                    "ending_hook": ep_state.script_data.ending_hook,
+                },
+            )
+
+            # P0-4 门禁：分镜数量必须落在 [min, max] 区间，否则退回重写而非盲目进入渲染。
+            shot_count = len(result.shots)
+            if shot_count < _min_shots() or shot_count > _max_shots():
+                ep_state.status = "storyboard_blocked"
+                ep_state.feedback_log.append(
+                    FeedbackLog(
+                        from_agent="Agent_4_Storyboard",
+                        to_agent="Operator",
+                        reason_code="SHOT_COUNT_GATE",
+                        message=f"{ep_key} 分镜数量 {shot_count} 不在 [{_min_shots()},{_max_shots()}] 区间，已拦截。",
+                    )
+                )
+                print(f"❌ {ep_key} 分镜数量 {shot_count} 不达标（需 {_min_shots()}-{_max_shots()}），已拦截，不进入渲染。")
+                state["episodes"][ep_key] = ep_state
+                if "blocked" not in state.get("system_status", ""):
+                    state["system_status"] = "blocked_on_storyboard_generation"
+                continue
+
             # 更新状态
             ep_state.storyboard_data = result.shots
             ep_state.video_assets = []
             ep_state.final_video_path = None
             ep_state.growth_assets = []
             ep_state.status = "storyboard_done"
-            
+
             print(f"✅ 成功生成 {ep_key} 的 {len(result.shots)} 条分镜指令。详细 Prompt 如下：")
             print(f"\n====== [Media Agent: Storyboard Shots for {ep_key}] ======")
             for s in result.shots:
@@ -115,23 +169,40 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
                 print(f"    - 音效: {s.audio}")
                 print("-" * 40)
             print("=================================================\n")
-            
+
         except Exception as e:
-            print(f"      [Media Agent] LLM 链条抛出异常或无API key: {e}")
-            print("      使用内置兜底方案生成 Modal Cards...")
-            mock_shot = ShotStoryboard(
-                shot_id=f"{ep_key}_s01",
-                camera="特写镜头, 静态",
-                visual_prompt="男人嘴角微微抽动，眼神直视镜头，顶光照明，面部表情凝重。",
-                dialogue="你以为你赢定了？",
-                duration="4s",
-                audio="沉重的低音提琴，雨声渐强"
-            )
-            ep_state.storyboard_data = [mock_shot]
-            ep_state.video_assets = []
-            ep_state.final_video_path = None
-            ep_state.growth_assets = []
-            ep_state.status = "storyboard_done"
+            # P0-4：生产模式下不得用一个 mock 镜头冒充整集并进入昂贵的视频生成。
+            # LLM 失败（已重试 3 次）→ 标记 blocked，禁止进入渲染。
+            print(f"      [Media Agent] 分镜 LLM 重试后仍失败：{e}")
+            if _allow_mock_fallback():
+                print("      ⚠️ DRAMAMATRIX_ALLOW_MOCK_STORYBOARD=1，使用内置兜底（仅限调试）。")
+                mock_shot = ShotStoryboard(
+                    shot_id=f"{ep_key}_s01",
+                    camera="特写镜头, 静态",
+                    visual_prompt="男人嘴角微微抽动，眼神直视镜头，顶光照明，面部表情凝重。",
+                    dialogue="你以为你赢定了？",
+                    duration="4s",
+                    audio="沉重的低音提琴，雨声渐强"
+                )
+                ep_state.storyboard_data = [mock_shot]
+                ep_state.video_assets = []
+                ep_state.final_video_path = None
+                ep_state.growth_assets = []
+                ep_state.status = "storyboard_done"
+            else:
+                ep_state.status = "storyboard_blocked"
+                ep_state.feedback_log.append(
+                    FeedbackLog(
+                        from_agent="Agent_4_Storyboard",
+                        to_agent="Operator",
+                        reason_code="STORYBOARD_LLM_FAILED",
+                        message=f"{ep_key} 分镜 LLM 重试 3 次仍失败：{e}；已拦截，禁止进入渲染。",
+                    )
+                )
+                print(f"❌ {ep_key} 分镜生成失败，已标记 storyboard_blocked，不进入视频生成。")
+                state["episodes"][ep_key] = ep_state
+                state["system_status"] = "blocked_on_storyboard_generation"
+                continue
 
         # P1-A：连续性归一化（软约束）——对齐相邻镜边界状态、回填 scene_id，
         # 收集 continuity_warnings 而非硬失败。

@@ -45,6 +45,14 @@ class AgnesSubmissionUncertain(AgnesVideoError):
     """A create request timed out after it may have reached Agnes."""
 
 
+class AgnesQueueFull(AgnesVideoError):
+    """Agnes returned an explicit capacity/rate-limit refusal (queue_full / 429).
+
+    Safe to retry later: no task was created, so no billing. Distinct from
+    AgnesSubmissionUncertain (network interruption, may have been received)."""
+
+
+
 def _int_env(name: str, default: int) -> int:
     value = os.getenv(name)
     return default if value in (None, "") else int(value)
@@ -214,6 +222,10 @@ class AgnesVideoClient:
                 {"http": settings.proxy_url, "https": settings.proxy_url}
             )
         self.download_session.headers.update({"User-Agent": "DramaMatrix/1.0"})
+        # P0-6: preflight cache so repeated Agent 5 re-entries within one process
+        # don't re-run the HTTPS check (and hit transient SSL EOF) every time.
+        self._preflight_ok_at: float = 0.0
+        self._preflight_ttl = float(os.getenv("AGNES_PREFLIGHT_CACHE_SECONDS", "300"))
 
     @property
     def result_base_url(self) -> str:
@@ -235,7 +247,18 @@ class AgnesVideoClient:
         )
 
     def preflight(self) -> None:
-        """Verify a real HTTPS path and credentials without creating a video task."""
+        """Verify a real HTTPS path and credentials without creating a video task.
+
+        Cached for AGNES_PREFLIGHT_CACHE_SECONDS (default 300s) per process so
+        repeated Agent 5 re-entries don't re-hit the network each time (P0-6).
+        """
+        now = time.monotonic()
+        if self._preflight_ok_at and (now - self._preflight_ok_at) < self._preflight_ttl:
+            print(
+                f"✅ Agnes 预检（缓存有效，{self._preflight_ttl - (now - self._preflight_ok_at):.0f}s）："
+                f"{self.route_description} -> {urlparse(self.settings.base_url).hostname}"
+            )
+            return
         url = f"{self.settings.base_url}/models"
         try:
             response = self.session.get(
@@ -267,6 +290,7 @@ class AgnesVideoClient:
                 f"Agnes 预检失败（preflight）：端点返回 HTTP {response.status_code}，"
                 "预期为 2xx。请检查 base_url 与网关状态。"
             )
+        self._preflight_ok_at = time.monotonic()
         print(
             f"✅ Agnes HTTPS 预检通过：{self.route_description} -> "
             f"{urlparse(self.settings.base_url).hostname}"
@@ -284,6 +308,44 @@ class AgnesVideoClient:
             self.settings.retry_max_delay_seconds,
         )
 
+    def _retry_delay_with_jitter(self, attempt: int, response: Optional[requests.Response] = None) -> float:
+        """Backoff for queue_full/rate-limit POST retries (P0-1).
+
+        Prefer the server's Retry-After; otherwise a 30→60→120→240→300s ladder
+        capped at AGNES_QUEUE_RETRY_MAX_SECONDS (default 300), plus 10–20% jitter
+        to avoid thundering-herd against a saturated queue.
+        """
+        import random
+        if response is not None:
+            retry_after = response.headers.get("Retry-After", "").strip()
+            try:
+                return min(float(retry_after), self.settings.retry_max_delay_seconds)
+            except ValueError:
+                pass
+        ladder = [30.0, 60.0, 120.0, 240.0, 300.0]
+        base = ladder[min(attempt, len(ladder) - 1)]
+        base = min(base, float(os.getenv("AGNES_QUEUE_RETRY_MAX_SECONDS", "300")))
+        jitter = base * random.uniform(0.10, 0.20)
+        return base + jitter
+
+    def _is_safe_retry_status(self, status_code: int, detail: str) -> bool:
+        """Whether an HTTP rejection is safe to retry even for POST (P0-1).
+
+        These are server-side *explicit refusals where no task was created*:
+        429 rate-limit, 503 with queue_full, or a 5xx gateway blip. Retrying is
+        safe (no double-billing). Contrast with POST network interruption
+        (Timeout/ConnectionError) where the request may have reached the server
+        — those stay submission_uncertain.
+        """
+        if status_code == 429:
+            return True
+        if status_code in {500, 502, 503, 504}:
+            # 503 with content_policy is NOT a capacity issue; do not retry POST.
+            if "content_policy" in detail:
+                return False
+            return True
+        return False
+
     def _request_json(
         self,
         method: str,
@@ -291,7 +353,15 @@ class AgnesVideoClient:
         payload: Optional[Mapping[str, Any]] = None,
         stage: str = "request",
     ) -> dict[str, Any]:
-        retry_count = self.settings.get_retry_attempts if method.upper() == "GET" else 0
+        # GET always retries. POST retries ONLY on explicit safe refusals
+        # (429 / queue_full 5xx) — never on network interruption, which stays
+        # submission_uncertain to avoid double-billing (P0-1).
+        post_safe_retries = int(os.getenv("AGNES_POST_RETRY_ATTEMPTS", "4"))
+        retry_count = (
+            self.settings.get_retry_attempts
+            if method.upper() == "GET"
+            else post_safe_retries
+        )
         for attempt in range(retry_count + 1):
             try:
                 response = self.session.request(
@@ -301,10 +371,14 @@ class AgnesVideoClient:
                     timeout=self.request_timeout,
                 )
                 detail = response.text[:600]
-                if response.status_code in {429, 500, 502, 503, 504} and attempt < retry_count:
-                    delay = self._retry_delay(attempt, response)
+                if (
+                    self._is_safe_retry_status(response.status_code, detail)
+                    and attempt < retry_count
+                ):
+                    delay = self._retry_delay_with_jitter(attempt, response)
                     print(
-                        f"   Agnes {stage} 返回 HTTP {response.status_code}，"
+                        f"   Agnes {stage} 返回 HTTP {response.status_code}"
+                        f"{'（queue_full/限流，安全重试）' if 'queue_full' in detail else ''}，"
                         f"{delay:g} 秒后进行第 {attempt + 1}/{retry_count} 次重试。"
                     )
                     time.sleep(delay)
@@ -314,6 +388,12 @@ class AgnesVideoClient:
                         f"Agnes {stage} HTTP {response.status_code}: {detail}"
                     )
                 if not response.ok:
+                    # A terminal safe-retry exhaustion surfaces as a typed error
+                    # so Agent 5 can route to waiting_for_agnes_capacity.
+                    if self._is_safe_retry_status(response.status_code, detail):
+                        raise AgnesQueueFull(
+                            f"Agnes {stage} HTTP {response.status_code}（队列/限流重试已耗尽）: {detail}"
+                        )
                     raise AgnesVideoError(
                         f"Agnes {stage} HTTP {response.status_code}: {detail}"
                     )
@@ -645,3 +725,26 @@ def extract_last_frame(video_path: Path, destination: Path) -> Optional[Path]:
     if destination.is_file():
         return destination
     return None
+
+
+def frame_to_data_uri(image_path: Path, max_bytes: int = 5_000_000) -> Optional[str]:
+    """Encode a local frame file as a base64 data URI (P0-5).
+
+    Remote Agnes cannot reach a local /data/... path, so for chain generation we
+    pass the previous shot's tail frame inline as a data: URI. Returns None if
+    the file is missing/too large (callers degrade to plain text-to-video).
+    A real deployment may instead upload to object storage; this keeps the
+    pipeline self-contained without an extra storage dependency.
+    """
+    import base64
+    if not image_path.is_file():
+        return None
+    size = image_path.stat().st_size
+    if size > max_bytes:
+        print(f"   ⚠️ 尾帧 {image_path.name} 过大（{size} 字节），跳过内联传递。")
+        return None
+    data = image_path.read_bytes()
+    encoded = base64.b64encode(data).decode("ascii")
+    suffix = image_path.suffix.lower().lstrip(".") or "png"
+    mime = "jpeg" if suffix in {"jpg", "jpeg"} else "png"
+    return f"data:image/{mime};base64,{encoded}"
