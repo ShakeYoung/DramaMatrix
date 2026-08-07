@@ -52,6 +52,14 @@ class AgnesQueueFull(AgnesVideoError):
     AgnesSubmissionUncertain (network interruption, may have been received)."""
 
 
+class AgnesGatewayUncertain(AgnesVideoError):
+    """A 5xx gateway error where task creation status is UNKNOWN (R1).
+
+    500/502/504 may occur AFTER the task was created (gateway returned failure).
+    Auto-retrying risks double-billing, so — like submission_uncertain — these
+    are NOT auto-retried; the operator must verify in the Agnes console."""
+
+
 
 def _int_env(name: str, default: int) -> int:
     value = os.getenv(name)
@@ -309,42 +317,46 @@ class AgnesVideoClient:
         )
 
     def _retry_delay_with_jitter(self, attempt: int, response: Optional[requests.Response] = None) -> float:
-        """Backoff for queue_full/rate-limit POST retries (P0-1).
+        """Backoff for queue_full/rate-limit POST retries (P0-1 / R1).
 
-        Prefer the server's Retry-After; otherwise a 30→60→120→240→300s ladder
-        capped at AGNES_QUEUE_RETRY_MAX_SECONDS (default 300), plus 10–20% jitter
-        to avoid thundering-herd against a saturated queue.
+        Prefer the server's Retry-After (capped at AGNES_QUEUE_RETRY_MAX_SECONDS,
+        NOT the 30s GET cap, so a server asking for 120s is honored); otherwise
+        a 30→60→120→240→300s ladder plus 10–20% jitter to avoid thundering-herd.
         """
         import random
+        queue_cap = float(os.getenv("AGNES_QUEUE_RETRY_MAX_SECONDS", "300"))
         if response is not None:
             retry_after = response.headers.get("Retry-After", "").strip()
             try:
-                return min(float(retry_after), self.settings.retry_max_delay_seconds)
+                return min(float(retry_after), queue_cap)
             except ValueError:
                 pass
         ladder = [30.0, 60.0, 120.0, 240.0, 300.0]
         base = ladder[min(attempt, len(ladder) - 1)]
-        base = min(base, float(os.getenv("AGNES_QUEUE_RETRY_MAX_SECONDS", "300")))
+        base = min(base, queue_cap)
         jitter = base * random.uniform(0.10, 0.20)
         return base + jitter
 
     def _is_safe_retry_status(self, status_code: int, detail: str) -> bool:
-        """Whether an HTTP rejection is safe to retry even for POST (P0-1).
+        """Whether an HTTP rejection is safe to retry even for POST (R1).
 
-        These are server-side *explicit refusals where no task was created*:
-        429 rate-limit, 503 with queue_full, or a 5xx gateway blip. Retrying is
-        safe (no double-billing). Contrast with POST network interruption
-        (Timeout/ConnectionError) where the request may have reached the server
-        — those stay submission_uncertain.
+        ONLY explicit refusals where the server confirmed NO task was created:
+          - 429 rate-limit
+          - 503 whose body indicates queue_full / capacity
+        Other 5xx (500/502/504) may fire AFTER task creation → not safe
+        (handled as gateway_uncertain to avoid double-billing).
         """
         if status_code == 429:
             return True
-        if status_code in {500, 502, 503, 504}:
-            # 503 with content_policy is NOT a capacity issue; do not retry POST.
-            if "content_policy" in detail:
-                return False
+        if status_code == 503 and ("queue_full" in detail or "capacity" in detail):
             return True
         return False
+
+    def _is_gateway_uncertain_status(self, status_code: int, detail: str) -> bool:
+        """A 5xx where task creation status is unknown (R1). Not auto-retried."""
+        if "content_policy" in detail:
+            return False
+        return status_code in {500, 502, 503, 504}
 
     def _request_json(
         self,
@@ -393,6 +405,12 @@ class AgnesVideoClient:
                     if self._is_safe_retry_status(response.status_code, detail):
                         raise AgnesQueueFull(
                             f"Agnes {stage} HTTP {response.status_code}（队列/限流重试已耗尽）: {detail}"
+                        )
+                    # R1: 500/502/504 may fire after task creation → unknown,
+                    # do NOT auto-retry (double-billing risk).
+                    if self._is_gateway_uncertain_status(response.status_code, detail):
+                        raise AgnesGatewayUncertain(
+                            f"Agnes {stage} HTTP {response.status_code}（网关不确定，任务可能已创建，已熔断重试）: {detail}"
                         )
                     raise AgnesVideoError(
                         f"Agnes {stage} HTTP {response.status_code}: {detail}"
@@ -596,11 +614,20 @@ def trim_unstable_frames(path: Path, workdir: Path, head: Optional[int] = None, 
     except (subprocess.CalledProcessError, ValueError, ZeroDivisionError):
         fps = 24.0
     start = head / fps
+    # R5：先读真实时长，再算出 -t 的数值（ffmpeg 不接受 "max(...)" 表达式）。
+    duration = video_duration(path) if shutil.which("ffprobe") else 0.0
     out = workdir / f"trim_{path.name}"
     command = [ffmpeg, "-y", "-ss", f"{start:.3f}", "-i", str(path)]
     if tail > 0:
-        # -sseof-style tail trim via tduration; approximate by trimming tail seconds.
-        command += ["-t", f"max(0, duration-{(head + tail) / fps})"]
+        if duration > 0:
+            keep = max(0.0, duration - (head + tail) / fps)
+        else:
+            keep = 0.0
+        if keep > 0:
+            command += ["-t", f"{keep:.3f}"]
+        else:
+            # Nothing left after trim → skip trimming, return original.
+            return path
     command += ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-movflags", "+faststart", str(out)]
     try:
         subprocess.run(command, check=True, capture_output=True, text=True)
@@ -725,6 +752,24 @@ def extract_last_frame(video_path: Path, destination: Path) -> Optional[Path]:
     if destination.is_file():
         return destination
     return None
+
+
+def extract_first_frame(video_path: Path, destination: Path) -> Optional[Path]:
+    """Extract the first frame of a shot for QC (R3). Returns None without ffmpeg."""
+    try:
+        ffmpeg = _require_binary("ffmpeg")
+    except AgnesVideoError:
+        return None
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        ffmpeg, "-y", "-i", str(video_path), "-frames:v", "1", "-q:v", "2", str(destination),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        print(f"   ⚠️ 提取首帧失败：{exc.stderr[-300:]}")
+        return None
+    return destination if destination.is_file() else None
 
 
 def frame_to_data_uri(image_path: Path, max_bytes: int = 5_000_000) -> Optional[str]:

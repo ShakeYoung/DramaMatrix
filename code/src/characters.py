@@ -188,36 +188,55 @@ def _edit_distance(a: str, b: str) -> int:
 
 
 def canonicalize_characters(characters: Sequence[CharacterSheet]) -> list[CharacterSheet]:
-    """Assign stable canonical IDs and merge near-duplicate names (P1-2).
+    """Assign stable canonical IDs and merge near-duplicate names (P1-2 / R6).
 
     Fixes drift like "Zhang Ruochen" vs "Zhang Ruocheng" (1-char edit distance)
-    by collapsing them onto one canonical entry with a stable id, so downstream
-    prompts reference a single identity instead of free-text variants.
+    by collapsing them onto one canonical entry with a stable character_id and
+    canonical_name, recording variants as aliases. Uses dedicated fields rather
+    than overloading signature.
     """
     merged: list[CharacterSheet] = []
     for ch in characters:
         canonical = ch
         for existing in merged:
-            # Same name, or very close transliteration (<=1 char diff, len>=4).
             if (
                 existing.name == ch.name
                 or (len(ch.name) >= 4 and _edit_distance(existing.name, ch.name) <= 1)
             ):
-                # Keep the first-seen name as canonical; enrich appearance/desc.
+                # Keep the first-seen name as canonical; enrich appearance/appearance.
                 if ch.appears_in:
-                    new_appears = list(set(existing.appears_in) | set(ch.appears_in))
-                    existing.appears_in = new_appears
+                    existing.appears_in = list(set(existing.appears_in) | set(ch.appears_in))
                 if ch.appearance and ch.appearance not in existing.appearance:
                     existing.appearance = (existing.appearance + "；" + ch.appearance).strip("；")
+                # Record the variant as an alias (R6).
+                if ch.name and ch.name != existing.name and ch.name not in existing.aliases:
+                    existing.aliases = list(existing.aliases) + [ch.name]
                 canonical = None
                 break
         if canonical is not None:
             merged.append(canonical)
-    # Assign stable canonical IDs.
+    # Assign stable canonical IDs / canonical_name on dedicated fields (R6).
     for idx, ch in enumerate(merged, 1):
-        # Store in wardrobe_id's sibling field role-free; reuse signature to carry id.
-        object.__setattr__(ch, "signature", ch.signature or f"char_{idx:02d}")
+        ch.character_id = ch.character_id or f"char_{idx:02d}"
+        ch.canonical_name = ch.canonical_name or ch.name
     return merged
+
+
+def apply_alias_substitution(text: str, characters: Sequence[CharacterSheet]) -> str:
+    """Replace alias names in a prompt with the canonical name (R6).
+
+    So a storyboard prompt mentioning "Zhang Ruocheng" gets rewritten to the
+    canonical "Zhang Ruochen", keeping a single identity in generation prompts.
+    """
+    if not text:
+        return text
+    result = text
+    for ch in characters:
+        canonical = ch.canonical_name or ch.name
+        for alias in ch.aliases:
+            if alias and alias != canonical and alias in result:
+                result = result.replace(alias, canonical)
+    return result
 
 
 def render_character_block(characters: Sequence[CharacterSheet]) -> str:

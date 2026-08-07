@@ -247,5 +247,131 @@ class ExitCodeTests(unittest.TestCase):
         self.assertFalse("video_assets_downloaded".startswith(("blocked_", "waiting_", "failed")))
 
 
+class GatewayUncertainTests(unittest.TestCase):
+    """R1: plain 500/502/504 → gateway_uncertain (no auto-retry); 429/queue_full safe."""
+
+    def setUp(self):
+        self.settings = AgnesVideoSettings(api_key="k")
+
+    def test_plain_500_raises_gateway_uncertain(self):
+        from src.agnes_video import AgnesGatewayUncertain
+        client = AgnesVideoClient(self.settings)
+        with patch.object(client, "session") as sess:
+            sess.request.return_value = FakeResponse(500, text='{"error":"internal"}')
+            with self.assertRaises(AgnesGatewayUncertain):
+                client.create_video(prompt="p", negative_prompt="n", duration="4s", seed=1)
+        # Not retried (single call).
+        self.assertEqual(sess.request.call_count, 1)
+
+    def test_503_without_queue_full_is_gateway_uncertain(self):
+        from src.agnes_video import AgnesGatewayUncertain
+        client = AgnesVideoClient(self.settings)
+        with patch.object(client, "session") as sess:
+            sess.request.return_value = FakeResponse(503, text='{"error":"maintenance"}')
+            with self.assertRaises(AgnesGatewayUncertain):
+                client.create_video(prompt="p", negative_prompt="n", duration="4s", seed=1)
+
+    def test_retry_after_not_capped_to_30s(self):
+        # R1: a server Retry-After of 120s must NOT be truncated to retry_max_delay (30s).
+        client = AgnesVideoClient(self.settings)
+        resp = FakeResponse(503, text='{"error":"video_queue_full"}', headers={"Retry-After": "120"})
+        delay = client._retry_delay_with_jitter(0, resp)
+        self.assertGreaterEqual(delay, 120)
+
+
+class StoryboardBlockedRouteTests(unittest.TestCase):
+    """R2: storyboard_blocked has highest priority in route_from_start."""
+
+    def test_blocked_takes_priority_over_storyboard_done(self):
+        from src.graph import route_from_start
+        state = {"episodes": {
+            "ep_01": EpisodeState(status="storyboard_done"),
+            "ep_02": EpisodeState(status="storyboard_blocked"),
+        }}
+        self.assertEqual(route_from_start(state), "__end__")
+
+
+class TotalShotBudgetTests2(unittest.TestCase):
+    """R7: cumulative shot budget blocks when exceeded."""
+
+    def test_over_budget_blocks(self):
+        from src.agents.agent4_storyboard import process_agent4_storyboard
+        from src.agents.agent4_storyboard import StoryboardOutput
+        # Two episodes, each with 7 shots => total 14, budget 10 => blocked.
+        ep1 = EpisodeState(status="script_done",
+                           script_data=EpisodeScriptData(ep_id="ep_01", outline="o", ending_hook="h"))
+        ep2 = EpisodeState(status="script_done",
+                           script_data=EpisodeScriptData(ep_id="ep_02", outline="o", ending_hook="h"))
+        state = {"project_id": "p", "episodes": {"ep_01": ep1, "ep_02": ep2}, "characters": [], "system_status": "x"}
+        out = StoryboardOutput(shots=[make_shot(f"s{i}") for i in range(7)])
+        with patch.dict(os.environ, {"DRAMAMATRIX_MAX_TOTAL_SHOTS": "10",
+                                     "DRAMAMATRIX_MIN_SHOTS_PER_EPISODE": "1"}, clear=False), patch(
+            "src.agents.agent4_storyboard.create_text_model"):
+            with patch("src.agents.agent4_storyboard._invoke_storyboard_with_retry", return_value=out):
+                process_agent4_storyboard(state)
+        self.assertEqual(state["system_status"], "blocked_on_storyboard_generation")
+        self.assertTrue(all(ep.status == "storyboard_blocked" for ep in state["episodes"].values()))
+
+
+class AliasSubstitutionTests(unittest.TestCase):
+    """R6: alias names in prompts are replaced with canonical_name."""
+
+    def test_alias_replaced_in_prompt(self):
+        from src.characters import apply_alias_substitution
+        chars = [CharacterSheet(name="Zhang Ruochen", appearance="x", signature="",
+                                canonical_name="Zhang Ruochen", aliases=["Zhang Ruocheng"])]
+        text = "Zhang Ruocheng stands in the rain."
+        self.assertNotIn("Zhang Ruocheng", apply_alias_substitution(text, chars))
+        self.assertIn("Zhang Ruochen", apply_alias_substitution(text, chars))
+
+    def test_canonical_uses_dedicated_fields(self):
+        from src.characters import canonicalize_characters
+        chars = [
+            CharacterSheet(name="Zhang Ruochen", appearance="红衣", signature="sig"),
+            CharacterSheet(name="Zhang Ruocheng", appearance="红衣", signature="sig2"),
+        ]
+        merged = canonicalize_characters(chars)
+        self.assertEqual(len(merged), 1)
+        self.assertTrue(merged[0].character_id.startswith("char_"))
+        self.assertEqual(merged[0].canonical_name, "Zhang Ruochen")
+        self.assertIn("Zhang Ruocheng", merged[0].aliases)
+        # signature NOT overwritten by id.
+        self.assertEqual(merged[0].signature, "sig")
+
+
+class BackoffWindowTests(unittest.TestCase):
+    """R10: queue-full sets next_retry_at; within window the ep is skipped."""
+
+    def test_queue_full_sets_next_retry_at(self):
+        from src.agents.agent5_director import process_agent5_director
+        ep = EpisodeState(status="storyboard_done", storyboard_data=[make_shot("s1")])
+        state = {"project_id": "p", "characters": [CharacterSheet(name="男", appearance="x", signature="")],
+                 "episodes": {"ep_01": ep}, "system_status": "x"}
+        client = MagicMock()
+        client.preflight.return_value = None
+        client.create_video.side_effect = AgnesQueueFull("queue full")
+        with patch.dict(os.environ, {"DRAMAMATRIX_OUTPUT_DIR": tempfile.mkdtemp(),
+                                     "AGNES_POST_RETRY_ATTEMPTS": "0"}, clear=False), patch(
+            "src.agents.agent5_director.AgnesVideoClient", return_value=client), patch(
+            "src.agents.agent5_director.AgnesVideoSettings.from_environment",
+            return_value=AgnesVideoSettings(api_key="x")), patch("src.agents.agent5_director.db_save_project_state"):
+            process_agent5_director(state)
+        self.assertEqual(ep.status, "waiting_for_agnes_capacity")
+        self.assertGreater(ep.next_retry_at, 0)
+        self.assertEqual(ep.queue_retry_count, 1)
+
+
+class TrimFixTests(unittest.TestCase):
+    """R5: trim no longer emits an invalid '-t max(...)' expression."""
+
+    def test_trim_command_has_numeric_t(self):
+        import inspect
+        from src.agnes_video import trim_unstable_frames
+        src = inspect.getsource(trim_unstable_frames)
+        self.assertNotIn("max(0, duration", src)
+        # Numeric computation path present.
+        self.assertIn("keep", src)
+
+
 if __name__ == "__main__":
     unittest.main()

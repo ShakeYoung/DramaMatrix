@@ -68,6 +68,11 @@ def route_from_start(state: DramaState) -> str:
     """Resume a persisted project at its first unfinished stage."""
     episodes = list(state.get("episodes", {}).values())
     if episodes:
+        # R2：分镜门禁拦截为最高优先级——即使存在其他 storyboard_done 集，
+        # 也不能进入昂贵的视频生成，必须先解决分镜阻塞。
+        if any(ep.status == "storyboard_blocked" for ep in episodes):
+            print(">> Router: 检测到 storyboard_blocked，恢复中止（需人工修正分镜后重置状态）")
+            return END
         if any(ep.status == "submission_uncertain" for ep in episodes):
             return END
         if any(ep.status in {"script_done", "director_rejected"} for ep in episodes):

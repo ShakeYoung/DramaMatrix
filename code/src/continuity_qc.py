@@ -28,7 +28,7 @@ class ContinuityResult:
 
 
 class ContinuityChecker(Protocol):
-    """Pluggable per-shot continuity check (P2-A)."""
+    """Pluggable per-shot continuity check (P2-A / R3)."""
 
     def check(
         self,
@@ -36,6 +36,7 @@ class ContinuityChecker(Protocol):
         prev_last_frame: Optional[Path],
         curr_video: Path,
         shot: ShotStoryboard,
+        curr_first_frame: Optional[Path] = None,
     ) -> ContinuityResult: ...
 
 
@@ -44,21 +45,40 @@ def _ffmpeg_available() -> bool:
 
 
 def _frame_mean_brightness(image: Path) -> Optional[float]:
-    """Mean luminance of a still frame via ffmpeg signalstats (best-effort)."""
+    """Mean luminance of a still frame via ffmpeg signalstats (best-effort, R3)."""
     ffmpeg = shutil.which("ffmpeg")
-    if not ffmpeg:
+    if not ffmpeg or not image.is_file():
         return None
     try:
         result = subprocess.run(
-            [ffmpeg, "-i", str(image), "-vf", "signalstats", "-f", "null", "-"],
-            check=True,
-            capture_output=True,
-            text=True,
+            [ffmpeg, "-hide_banner", "-i", str(image), "-vf", "signalstats", "-f", "null", "-"],
+            check=False, capture_output=True, text=True,
         )
-    except subprocess.CalledProcessError:
+    except (subprocess.SubprocessError, OSError):
         return None
-    # signalstats prints YAVG=.. to stderr; parse defensively.
-    return None  # lightweight: brightness parsing is optional; default checker focuses on presence
+    # signalstats writes YAVG= to stderr; parse the last occurrence.
+    import re
+    matches = re.findall(r"YAVG=([0-9.]+)", result.stderr)
+    if matches:
+        try:
+            return float(matches[-1])
+        except ValueError:
+            return None
+    return None
+
+
+def _frame_brightness_distance(frame_a: Path, frame_b: Path) -> Optional[float]:
+    """Absolute brightness difference between two frames (R3). None if unavailable."""
+    a = _frame_mean_brightness(frame_a)
+    b = _frame_mean_brightness(frame_b)
+    if a is None or b is None:
+        return None
+    return abs(a - b)
+
+
+def _brightness_threshold() -> float:
+    """Configurable brightness-difference threshold for QC failure (R3)."""
+    return float(__import__("os").getenv("DRAMAMATRIX_QC_BRIGHTNESS_THRESHOLD", "25"))
 
 
 class DefaultChecker:
@@ -79,6 +99,7 @@ class DefaultChecker:
         prev_last_frame: Optional[Path],
         curr_video: Path,
         shot: ShotStoryboard,
+        curr_first_frame: Optional[Path] = None,
     ) -> ContinuityResult:
         issues: list[str] = []
         if not curr_video.is_file():
@@ -91,8 +112,12 @@ class DefaultChecker:
             # Graceful degradation: cannot run real checks → pass with a note.
             issues.append("无 ffmpeg，跳过像素级连续性检查（建议服务器端启用）。")
             return ContinuityResult(passed=True, issues=issues)
-        # When ffmpeg exists we could compute histogram distance here; left as a
-        # hook. The default stays permissive to avoid false negatives.
+        # R3：当存在上一镜尾帧与当前镜首帧时，做亮度/直方图差异比较。
+        if prev_last_frame and curr_first_frame:
+            diff = _frame_brightness_distance(prev_last_frame, curr_first_frame)
+            if diff is not None and diff > _brightness_threshold():
+                issues.append(f"上一镜尾帧与当前镜首帧亮度差异过大（{diff:.2f}），可能存在跳变。")
+                return ContinuityResult(passed=False, issues=issues)
         return ContinuityResult(passed=True, issues=issues)
 
 

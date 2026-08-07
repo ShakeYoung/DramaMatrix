@@ -180,3 +180,23 @@ def prepare_shot_reference(
     elif scene_id and scene_id in scene_references:
         result["image_url"] = scene_references[scene_id]
     return result
+
+
+def load_scene_references() -> dict[str, str]:
+    """Load scene_id -> reference image_url mapping (R8).
+
+    Scene first-shots otherwise have no reference, causing identity/wardrobe to
+    randomize. A deployment pre-generates character/scene reference images and
+    registers them here via DRAMAMATRIX_SCENE_REFERENCES (JSON:
+    '{"scene_01": "https://.../scene_01.png", ...}'). Returns {} when unset,
+    so behavior is unchanged unless references are supplied.
+    """
+    import json
+    raw = os.getenv("DRAMAMATRIX_SCENE_REFERENCES", "").strip()
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+        return {str(k): str(v) for k, v in data.items() if v}
+    except (json.JSONDecodeError, TypeError):
+        return {}

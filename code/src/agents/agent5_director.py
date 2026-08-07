@@ -13,6 +13,7 @@ from src.agnes_video import (
     AgnesConfigurationError,
     AgnesConnectionError,
     AgnesContentPolicyViolation,
+    AgnesGatewayUncertain,
     AgnesQueueFull,
     AgnesSubmissionUncertain,
     AgnesTaskFailed,
@@ -63,6 +64,38 @@ def _reject_episode(ep_key: str, ep_state: EpisodeState, message: str) -> None:
     print(f"❌ {ep_key} 的 Agnes 渲染任务失败，已将明确错误反馈给 Agent 4。")
 
 
+def _mark_shot_for_redraw(ep_state: EpisodeState, shot_id: str, issues, settings) -> None:
+    """R4：镜头级重绘——只删当前镜 asset，保留已通过的镜头，记录重绘次数。
+
+    与 _reject_episode（退回整集）不同：质检失败仅重做当前镜，受 max_revisions 约束。
+    """
+    max_redraw = getattr(settings, "max_revisions", 2)
+    # 统计该镜已重绘次数（通过 feedback_log 的 QC_FAIL 记录）。
+    redraw_count = sum(
+        1 for fb in ep_state.feedback_log
+        if fb.reason_code == "QC_REDRAW" and shot_id in (fb.message or "")
+    )
+    if redraw_count >= max_redraw:
+        # 重绘次数耗尽 → 退回整集重写分镜。
+        _reject_episode(ep_state.script_data.ep_id if ep_state.script_data else "ep",
+                        ep_state,
+                        f"镜头 {shot_id} 连续性质检重绘 {redraw_count} 次仍不合格：{'；'.join(issues)}")
+        return
+    # 删除当前镜的 asset（保留前面的），下一轮 Agent5 重入会重新创建该镜。
+    ep_state.video_assets = [a for a in ep_state.video_assets if a.shot_id != shot_id]
+    ep_state.feedback_log.append(
+        FeedbackLog(
+            from_agent="Agent_5_Agnes_Director",
+            to_agent="Agent_5_Agnes_Director",
+            reason_code="QC_REDRAW",
+            message=f"镜头 {shot_id} 质检不合格，将重绘（第 {redraw_count + 1}/{max_redraw} 次）：{'；'.join(issues)}",
+        )
+    )
+    # 保持 storyboard_done，让路由回到 Agent5 重绘该镜（而非进 Agent6）。
+    ep_state.status = "storyboard_done"
+    print(f"⏸️ 镜头 {shot_id} 质检不合格，标记重绘（保留已通过镜头）。")
+
+
 def _checkpoint(state: DramaState, ep_key: str, ep_state: EpisodeState) -> None:
     """Durably record a submitted task before any further network request."""
     state["episodes"][ep_key] = ep_state
@@ -100,14 +133,16 @@ def _render_episode(
     from src.characters import render_character_block
     from src.continuity import (
         conditional_generation_enabled,
+        load_scene_references,
         prepare_shot_reference,
         scene_seed,
     )
     from src.continuity_qc import get_checker
-    from src.agnes_video import extract_last_frame, frame_to_data_uri
+    from src.agnes_video import extract_first_frame, extract_last_frame, frame_to_data_uri
     character_block = render_character_block(state.get("characters", []))
     conditional = conditional_generation_enabled()
-    scene_references: dict[str, str] = {}  # scene_id -> reference image_url (P1-C)
+    # R8：加载场景参考图映射（部署时预生成角色/场景参考图并注册）。
+    scene_references: dict[str, str] = load_scene_references()
     if not is_resume:
         ep_state.video_assets = []
     assets_by_shot = {asset.shot_id: asset for asset in ep_state.video_assets}
@@ -115,12 +150,16 @@ def _render_episode(
     action = ("条件链式生成" if conditional else "恢复轮询/下载" if is_resume else "逐镜提交")
     print(f"-> {ep_key}: {action} {len(shots)} 个 Agnes 视频任务。")
 
-    previous_last_frame: str | None = None  # data URI / url of previous shot's tail frame
+    # R3：分离两条用途——previous_tail_path 供本地 QC（合法本地路径），
+    # previous_tail_reference 供 Agnes（data URI / HTTPS URL）。两者同步更新。
+    previous_tail_path: Path | None = None
+    previous_tail_reference: str | None = None
     previous_scene_id: str | None = None
     for index, shot in enumerate(shots, start=1):
         # P0-5：场景切换时清除上一场景尾帧，避免跨场景错误继承。
         if previous_scene_id is not None and shot.scene_id != previous_scene_id:
-            previous_last_frame = None
+            previous_tail_path = None
+            previous_tail_reference = None
         previous_scene_id = shot.scene_id
         prompt = build_agnes_prompt(shot, character_block)
         asset = assets_by_shot.get(shot.shot_id)
@@ -132,8 +171,10 @@ def _render_episode(
                 # P1-3：已存在且非空的尾帧不重复提取，避免恢复时 O(n²) 抽帧。
                 if not frame_path.is_file() or frame_path.stat().st_size == 0:
                     extract_last_frame(Path(asset.local_path), frame_path)
-                data_uri = frame_to_data_uri(frame_path)
-                previous_last_frame = data_uri if data_uri else previous_last_frame
+                if frame_path.is_file():
+                    previous_tail_path = frame_path
+                    data_uri = frame_to_data_uri(frame_path)
+                    previous_tail_reference = data_uri if data_uri else None
             continue
         try:
             if asset and (asset.video_id or asset.task_id):
@@ -154,9 +195,10 @@ def _render_episode(
                     seed=scene_seed(20260801, shot.scene_id, index) if conditional else 20260801 + index,
                 )
                 if conditional:
-                    ref = prepare_shot_reference(shot, scene_references, previous_last_frame)
+                    ref = prepare_shot_reference(shot, scene_references, previous_tail_reference)
                     if ref.get("image_url"):
                         create_kwargs["image_url"] = ref["image_url"]
+                        print(f"   [{ep_key}/{shot.shot_id}] 携带参考图（{'上一镜尾帧' if previous_tail_reference else '场景参考'}）。")
                 created = client.create_video(**create_kwargs)
                 created_video_id = created.get("video_id")
                 video_id = str(created_video_id or created.get("task_id") or created["id"])
@@ -196,41 +238,58 @@ def _render_episode(
             asset.status = "completed"
             asset.local_path = str(local_path)
             _checkpoint(state, ep_key, ep_state)
-            # P1-C：链式生成——下载完成后提取尾帧，供下一镜作为首帧。
+            # R3：正确的质检顺序——提取当前镜首帧，与上一镜尾帧比较；通过后再提取
+            # 当前镜尾帧供下一镜使用。质检用合法本地路径，不用 data URI。
+            current_first_frame: Path | None = None
             if conditional:
-                frame_path = shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}_tail.png"
-                if not frame_path.is_file() or frame_path.stat().st_size == 0:
-                    extract_last_frame(Path(local_path), frame_path)
-                data_uri = frame_to_data_uri(frame_path)
-                previous_last_frame = data_uri if data_uri else previous_last_frame
-            # P2-A：逐镜质检。不合格只重绘当前镜（受 max_revisions 约束），不等全部生成。
+                first_path = shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}_head.png"
+                if not first_path.is_file() or first_path.stat().st_size == 0:
+                    extract_first_frame(Path(local_path), first_path)
+                if first_path.is_file():
+                    current_first_frame = first_path
+            # P2-A：逐镜质检（上一镜尾帧 vs 当前镜首帧）。不合格只重绘当前镜。
             qc_result = get_checker().check(
                 prev_video=None,
-                prev_last_frame=Path(previous_last_frame) if previous_last_frame else None,
+                prev_last_frame=previous_tail_path,
                 curr_video=Path(local_path),
+                curr_first_frame=current_first_frame,
                 shot=shot,
             )
             if not qc_result.passed:
-                _reject_episode(
-                    ep_key,
-                    ep_state,
-                    f"镜头 {shot.shot_id} 连续性质检未通过：{'；'.join(qc_result.issues)}",
-                )
+                # R4：镜头级重绘而非退回整集。删除当前镜 asset，标记 redraw_pending。
+                _mark_shot_for_redraw(ep_state, shot.shot_id, qc_result.issues, settings)
                 _checkpoint(state, ep_key, ep_state)
                 return
             if qc_result.issues:
                 print(f"   [{ep_key}/{shot.shot_id}] 质检告警：{'；'.join(qc_result.issues)}")
-        except AgnesSubmissionUncertain as exc:
+            # 质检通过：提取当前镜尾帧，更新两条轨道供下一镜。
+            if conditional:
+                frame_path = shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}_tail.png"
+                if not frame_path.is_file() or frame_path.stat().st_size == 0:
+                    extract_last_frame(Path(local_path), frame_path)
+                if frame_path.is_file():
+                    previous_tail_path = frame_path
+                    data_uri = frame_to_data_uri(frame_path)
+                    previous_tail_reference = data_uri if data_uri else None
+        except (AgnesSubmissionUncertain, AgnesGatewayUncertain) as exc:
+            # 提交结果未知 / 网关不确定（任务可能已创建）→ 熔断，需人工核对，不自动重试。
             ep_state.status = "submission_uncertain"
             _checkpoint(state, ep_key, ep_state)
-            print(f"❌ {ep_key}/{shot.shot_id} 提交状态未知，已熔断后续创建：{exc}")
+            print(f"❌ {ep_key}/{shot.shot_id} 提交状态未知/网关不确定，已熔断后续创建：{exc}")
             return
         except AgnesQueueFull as exc:
-            # P0-1/P0-2：队列满/限流是可恢复的——只暂停当前集，等待后重试当前镜，
-            # 不标记 render_failed，也不让其他集立即重入。
+            # P0-1/P0-2/R10：队列满/限流是可恢复的——只暂停当前集，记录 next_retry_at，
+            # 等待后重试当前镜，不标记 render_failed，也不让其他集立即重入。
+            import time as _time
             ep_state.status = "waiting_for_agnes_capacity"
+            ep_state.queue_retry_count = int(ep_state.queue_retry_count or 0) + 1
+            # 退避：60s × 2^(retry-1)，上限 600s。
+            backoff = min(60 * (2 ** (ep_state.queue_retry_count - 1)), 600)
+            ep_state.next_retry_at = _time.time() + backoff
+            ep_state.last_queue_error = str(exc)[:200]
             _checkpoint(state, ep_key, ep_state)
-            print(f"⏸️ {ep_key}/{shot.shot_id} Agnes 队列满，暂停等待容量后重试当前镜：{exc}")
+            print(f"⏸️ {ep_key}/{shot.shot_id} Agnes 队列满，第 {ep_state.queue_retry_count} 次等待，"
+                  f"约 {backoff}s 后（next_retry_at 已持久化）可重试当前镜：{exc}")
             return
         except (AgnesConnectionError, requests_exceptions.ChunkedEncodingError) as exc:
             # P0-3：瞬时连接失败不应把剩余剧集批量判 render_failed。
@@ -281,18 +340,25 @@ def process_agent5_director(state: DramaState) -> DramaState:
         print("❌ 角色圣经为空，已禁止渲染。请确认 Agent 3 已生成角色圣经，")
         print("   或设置 DRAMAMATRIX_ALLOW_NO_CHARACTERS=1 强制放行（不推荐，将丧失角色一致性）。")
         return state
-    targets = [
-        (key, ep)
-        for key, ep in state["episodes"].items()
-        if ep.status in {
+    import time as _time_now
+    now = _time_now.time()
+    targets = []
+    for key, ep in state["episodes"].items():
+        if ep.status not in {
             "storyboard_done",
             "rendering",
             "render_pending",
             "render_failed",
             "waiting_for_agnes_capacity",
             "waiting_for_connectivity",
-        }
-    ]
+        }:
+            continue
+        # R10：若仍在退避窗口内（next_retry_at 未到），本次跳过，等下次 --resume。
+        if ep.status == "waiting_for_agnes_capacity" and ep.next_retry_at and now < ep.next_retry_at:
+            remaining = ep.next_retry_at - now
+            print(f"⏳ {key} 仍在队列退避窗口（剩余 {remaining:.0f}s），本次跳过。")
+            continue
+        targets.append((key, ep))
     if not targets:
         print("没有等待 Agnes 渲染的剧集。")
         return state

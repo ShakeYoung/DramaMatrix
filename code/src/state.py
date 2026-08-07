@@ -55,6 +55,10 @@ class CharacterSheet(BaseModel):
     wardrobe_id: str = Field(default="", description="服装编号，便于跨镜服化锁定")
     reference_image_prompt: str = Field(default="", description="生成该角色参考图的提示词")
     appears_in: List[str] = Field(default_factory=list, description="出场集号列表，如 ['ep_01','ep_02']")
+    # R6：独立 canonical 身份字段（不再兼用 signature）
+    character_id: str = Field(default="", description="稳定角色 ID，如 char_01")
+    canonical_name: str = Field(default="", description="归一化后的标准名")
+    aliases: List[str] = Field(default_factory=list, description="别名/音译变体列表")
 
 class EvaluationReport(BaseModel):
     """小说爆点评估与可行性报告 (Agent 2)"""
@@ -137,6 +141,10 @@ class EpisodeState(BaseModel):
     growth_meta: Optional[GrowthMeta] = Field(default=None)
     # 分镜版本（P0-A）：recovery 重写时递增，隔离新旧镜头文件
     storyboard_version: int = Field(default=1)
+    # R10：队列/连接等待的恢复调度字段（next_retry_at 为 unix 时间戳，0 表示立即可重试）
+    next_retry_at: float = Field(default=0.0)
+    queue_retry_count: int = Field(default=0)
+    last_queue_error: Optional[str] = Field(default=None)
 
 
 class MarketFeedback(BaseModel):

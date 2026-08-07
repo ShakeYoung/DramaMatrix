@@ -212,6 +212,39 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
             for w in warnings[:5]:
                 print(f"      - {w.shot_id}.{w.field}: {w.message}")
 
+        # R6：角色 alias 替换——把分镜 prompt/对白中的别名替换为 canonical_name。
+        characters = state.get("characters", [])
+        if characters:
+            from src.characters import apply_alias_substitution
+            replaced = 0
+            for s in ep_state.storyboard_data:
+                before_v, before_d = s.visual_prompt, s.dialogue
+                s.visual_prompt = apply_alias_substitution(s.visual_prompt, characters)
+                s.dialogue = apply_alias_substitution(s.dialogue, characters)
+                if s.visual_prompt != before_v or s.dialogue != before_d:
+                    replaced += 1
+            if replaced:
+                print(f"   -> 角色 alias 替换：{replaced} 个镜头的 prompt 已归一化角色名。")
+
         state["episodes"][ep_key] = ep_state
-    
+
+    # R7：真正的总镜头预算门禁——累计所有集的分镜数，超预算则禁止进入视频生成。
+    total_budget = int(os.getenv("DRAMAMATRIX_MAX_TOTAL_SHOTS", "120"))
+    total_shots = sum(len(ep.storyboard_data) for ep in state["episodes"].values())
+    if total_shots > total_budget:
+        print(f"❌ 总分镜数 {total_shots} 超过预算 {total_budget}，已拦截，禁止进入视频生成。")
+        for ep_key, ep_state in state["episodes"].items():
+            if ep_state.status == "storyboard_done":
+                ep_state.status = "storyboard_blocked"
+                ep_state.feedback_log.append(
+                    FeedbackLog(
+                        from_agent="Agent_4_Storyboard",
+                        to_agent="Operator",
+                        reason_code="TOTAL_SHOT_BUDGET",
+                        message=f"总分镜数 {total_shots} 超预算 {total_budget}，需削减集数或每集分镜数。",
+                    )
+                )
+                state["episodes"][ep_key] = ep_state
+        state["system_status"] = "blocked_on_storyboard_generation"
+
     return state
