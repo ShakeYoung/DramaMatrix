@@ -130,6 +130,13 @@ def _mark_shot_for_redraw(
             message=f"镜头 {shot_id} 质检不合格，将重绘（第 {redraw_count + 1}/{max_redraw} 次）：{'；'.join(issues)}",
         )
     )
+    # P1-4：把重绘次数回填到 agnes_usage（按该镜任务 task_id 更新）。
+    if asset and asset.task_id:
+        try:
+            from src.db import db_update_agnes_usage_timing
+            db_update_agnes_usage_timing(asset.task_id, redraw_count=redraw_count + 1)
+        except Exception:
+            pass
     # 保持 storyboard_done，让路由回到 Agent5 重绘该镜（而非进 Agent6）。
     ep_state.status = "storyboard_done"
     print(f"⏸️ 镜头 {shot_id} 质检不合格，标记重绘（保留已通过镜头）。")
@@ -235,6 +242,7 @@ def _render_episode(
                         previous_tail_reference = data_uri if data_uri else None
             continue
         shot_create_started_at = time.time()  # F3：本镜创建起始（恢复/新建均记录）
+        is_new_create = False  # P1-4：仅本次新建的任务计算 render_seconds
         try:
             if asset and (asset.video_id or asset.task_id):
                 video_id = asset.video_id
@@ -266,12 +274,20 @@ def _render_episode(
                         create_kwargs["image_url"] = ref["image_url"]
                         ref_source = "上一镜尾帧" if previous_tail_reference else "场景参考"
                         print(f"   [{ep_key}/{shot.shot_id}] 携带参考图（{ref_source}）。")
-                        # F2：记录参考资产引用链——保存本地路径与 SHA-256 证据，
+                        # F2/P1-5：记录参考资产引用链——保存本地路径与 SHA-256 证据，
                         # 而非只依赖临时 data: URI；并把哈希回填到资产证据字段。
+                        # 场景参考若为本地文件路径（file:// 或相对/绝对路径），同样本地化哈希。
                         try:
                             from src.agnes_video import sha256_file
                             from src.db import db_insert_reference_asset
                             ref_local = previous_tail_path if previous_tail_reference else None
+                            if ref_local is None and not previous_tail_reference:
+                                # 场景参考：若 image_url 是本地路径则计算哈希
+                                scene_url = ref.get("image_url") or ""
+                                if scene_url and not scene_url.startswith(("data:", "http://", "https://")):
+                                    scene_path = Path(scene_url)
+                                    if scene_path.is_file():
+                                        ref_local = scene_path
                             ref_sha = sha256_file(ref_local) if ref_local else None
                             db_insert_reference_asset(
                                 project_id=state["project_id"],
@@ -334,11 +350,13 @@ def _render_episode(
                 ep_state.queue_retry_count = 0
                 ep_state.next_retry_at = 0.0
                 ep_state.last_queue_error = None
+                is_new_create = True  # P1-4：标记本次为新建任务（渲染耗时才有意义）
                 print(f"   [{ep_key}/{shot.shot_id}] 已创建 Agnes 任务并保存: {task_id}")
 
             completed = client.wait_for_video(video_id, task_id)
-            # F3：渲染耗时 = 创建后到轮询完成。
-            render_seconds = time.time() - shot_create_started_at
+            # F3：渲染耗时仅对"本次新建"的任务有意义（创建→完成）；
+            # 恢复任务从本次恢复开始计时不代表真实端到端渲染时长，置 None。
+            render_seconds = (time.time() - shot_create_started_at) if is_new_create else None
             remote_url = (completed.get("metadata") or {}).get("url")
             if not remote_url:
                 raise AgnesVideoError("Agnes 任务已完成但响应未包含 metadata.url。")
@@ -377,6 +395,21 @@ def _render_episode(
                 asset.has_audio = integrity.get("has_audio")
                 asset.audio_duration = integrity.get("audio_duration")
                 asset.downloaded_at = time.time()
+                # P0-3：无效视频硬门禁——ffprobe 存在但探测失败/无视频流/时长为 0
+                # （如 moov atom not found），不得视为成功资产，标记损坏后走重绘。
+                if integrity.get("probe_ok") is False:
+                    ep_state.status = "director_rejected"
+                    ep_state.feedback_log.append(
+                        FeedbackLog(
+                            from_agent="Agent_5_Agnes_Director",
+                            to_agent="Agent_4_Storyboard",
+                            reason_code="AGNES_RENDER_FAILED",
+                            message=f"镜头 {shot.shot_id} 下载的视频无效（moov 缺失/无视频流/时长为 0），已拒绝。",
+                        )
+                    )
+                    _checkpoint(state, ep_key, ep_state)
+                    print(f"❌ {ep_key}/{shot.shot_id} 下载的视频无效（ffprobe 校验失败），已退回重写。")
+                    return
             except Exception as exc:
                 print(f"   ⚠️ 媒体完整性采集失败（不阻断）：{exc}")
             _checkpoint(state, ep_key, ep_state)

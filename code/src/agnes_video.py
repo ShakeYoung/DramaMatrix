@@ -767,12 +767,13 @@ def sha256_file(path: Path, chunk_size: int = 65536) -> Optional[str]:
 
 
 def media_integrity(path: Path) -> dict:
-    """Probe a media file for integrity + real parameters (V1).
+    """Probe a media file for integrity + real parameters (V1 / P0-3).
 
     Returns a dict with: sha256, file_size_bytes, actual_duration, width,
-    height, frame_rate, bit_rate, has_audio, audio_duration. When ffprobe is
-    unavailable, degrades to sha256 + size only (no probe fields), so the main
-    pipeline never blocks on a missing binary.
+    height, frame_rate, bit_rate, has_audio, audio_duration, probe_ok.
+    - probe_ok=True: ffprobe succeeded AND found a video stream with duration>0.
+    - probe_ok=False: ffprobe missing (degraded, caller may skip hard gate),
+      OR ffprobe failed / no valid video stream (caller MUST treat as corrupt).
     """
     result: dict = {
         "sha256": sha256_file(path),
@@ -784,6 +785,7 @@ def media_integrity(path: Path) -> dict:
         "bit_rate": None,
         "has_audio": None,
         "audio_duration": None,
+        "probe_ok": None,  # None=ffprobe missing; True=valid; False=corrupt
     }
     ffprobe = shutil.which("ffprobe")
     if not ffprobe or not path.is_file():
@@ -816,6 +818,15 @@ def media_integrity(path: Path) -> dict:
     result["has_audio"] = has_audio_stream(path)
     if result["has_audio"]:
         result["audio_duration"] = result["actual_duration"]
+    # P0-3：判定有效性——ffprobe 成功 + 有视频流 + 时长>0。
+    duration = result["actual_duration"]
+    has_video_stream = bool(streams) and result["width"] is not None
+    if has_video_stream or duration is not None or result["width"] is not None:
+        # ffprobe 有输出：有效性 = 有视频流且时长>0
+        result["probe_ok"] = bool(has_video_stream and duration is not None and duration > 0)
+    else:
+        # ffprobe 存在但探测失败/无任何流（如 moov atom not found）→ 视为损坏
+        result["probe_ok"] = False
     return result
 
 

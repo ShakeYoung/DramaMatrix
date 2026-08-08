@@ -374,5 +374,107 @@ class RunContextUUIDTests(unittest.TestCase):
         self.assertEqual(ctx["config"].get("DRAMAMATRIX_MAX_EPISODES"), "2")
 
 
+class ManualScoreMigrationTests(unittest.TestCase):
+    """P0-1: old manual_scores table is migrated (columns + dedup + index)."""
+
+    def _make_old_db(self, db_path):
+        import sqlite3
+        conn = sqlite3.connect(db_path)
+        conn.execute(
+            """CREATE TABLE manual_scores (
+                id INTEGER PRIMARY KEY AUTOINCREMENT, project_id TEXT NOT NULL,
+                ep_key TEXT, shot_id TEXT,
+                scored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP, scorer TEXT,
+                character_consistency REAL, wardrobe_consistency REAL,
+                action_continuity REAL, subtitle_alignment REAL,
+                voice_alignment REAL, overall REAL, notes TEXT)"""
+        )
+        conn.execute("INSERT INTO manual_scores (project_id, ep_key, shot_id, scorer, overall) VALUES ('p1','ep_01','s1','a',4.0)")
+        conn.execute("INSERT INTO manual_scores (project_id, ep_key, shot_id, scorer, overall) VALUES ('p1','ep_01','s1','a',3.0)")
+        conn.commit()
+        conn.close()
+
+    def test_old_table_migrated(self):
+        import sqlite3
+        import src.db
+        with tempfile.TemporaryDirectory() as d:
+            src.db.DB_PATH = os.path.join(d, "test.db")
+            self._make_old_db(src.db.DB_PATH)
+            src.db.init_db()  # migration runs here
+            conn = sqlite3.connect(src.db.DB_PATH)
+            cols = {r[1] for r in conn.execute("PRAGMA table_info(manual_scores)").fetchall()}
+            rows = conn.execute("SELECT overall FROM manual_scores").fetchall()
+            conn.close()
+        self.assertIn("rubric_version", cols)
+        self.assertIn("round", cols)
+        self.assertIn("video_sha256", cols)
+        self.assertEqual(len(rows), 1)  # duplicate removed
+        self.assertEqual(rows[0][0], 3.0)  # kept the latest
+
+
+class QCThresholdTests(unittest.TestCase):
+    """P0-2: threshold is written into QC metrics."""
+
+    def test_metrics_include_threshold(self):
+        from src.continuity_qc import DefaultChecker
+        from src.state import ShotStoryboard
+        with tempfile.TemporaryDirectory() as d, patch.dict(
+            os.environ, {"DRAMAMATRIX_QC_BRIGHTNESS_THRESHOLD": "45"}, clear=False
+        ):
+            frame = Path(d) / "f.png"
+            frame.write_bytes(b"png")
+            video = Path(d) / "v.mp4"
+            video.write_bytes(b"video")
+            # patch ffmpeg availability to force the metrics path with frames
+            with patch("src.continuity_qc._ffmpeg_available", return_value=True), \
+                 patch("src.continuity_qc._frame_brightness_distance", return_value=10.0):
+                shot = ShotStoryboard(shot_id="s1", camera="c", visual_prompt="v", dialogue="", duration="4s", audio="a")
+                result = DefaultChecker().check(None, frame, video, shot, curr_first_frame=frame)
+        self.assertEqual(result.metrics.get("threshold"), 45.0)
+        self.assertEqual(result.metrics.get("brightness_diff"), 10.0)
+
+
+class MediaValidationGateTests(unittest.TestCase):
+    """P0-3: corrupt video (probe_ok=False) must be rejected."""
+
+    def test_probe_ok_false_for_corrupt(self):
+        import subprocess as _subprocess
+        from src.agnes_video import media_integrity
+        with tempfile.TemporaryDirectory() as d, patch("src.agnes_video.shutil.which", return_value="/usr/bin/ffprobe"), \
+             patch("src.agnes_video.subprocess.run", side_effect=_subprocess.CalledProcessError(1, "ffprobe")):
+            p = Path(d) / "corrupt.mp4"
+            p.write_bytes(b"not-a-real-mp4")
+            info = media_integrity(p)
+        self.assertIs(info["probe_ok"], False)
+
+    def test_probe_ok_none_without_ffprobe(self):
+        from src.agnes_video import media_integrity
+        with tempfile.TemporaryDirectory() as d, patch("src.agnes_video.shutil.which", return_value=None):
+            p = Path(d) / "v.mp4"
+            p.write_bytes(b"video")
+            info = media_integrity(p)
+        self.assertIsNone(info["probe_ok"])  # degraded, no hard gate
+
+
+class ClipCoverageTests(unittest.TestCase):
+    """P1-6: clip source shots computed from real durations, not all shots."""
+
+    def test_clip_covers_only_overlapping_shots(self):
+        from src.agents.agent7_growth import _shots_in_window
+        ep = EpisodeState(
+            storyboard_data=[make_shot("s1"), make_shot("s2"), make_shot("s3")],
+        )
+        ep.video_assets = [
+            GeneratedVideoAsset(shot_id="s1", video_id="v", status="ok", prompt="p", actual_duration=4.0),
+            GeneratedVideoAsset(shot_id="s2", video_id="v", status="ok", prompt="p", actual_duration=4.0),
+            GeneratedVideoAsset(shot_id="s3", video_id="v", status="ok", prompt="p", actual_duration=4.0),
+        ]
+        # window [3, 6) covers s1 tail (3-4) + s2 (4-6)
+        covered = _shots_in_window(ep, 3.0, 3.0)
+        self.assertEqual(covered, ["s1", "s2"])
+        # window [0, 4) covers s1 only
+        self.assertEqual(_shots_in_window(ep, 0.0, 4.0), ["s1"])
+
+
 if __name__ == "__main__":
     unittest.main()

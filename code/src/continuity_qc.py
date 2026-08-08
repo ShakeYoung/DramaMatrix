@@ -127,13 +127,16 @@ class DefaultChecker:
         # R3：当存在上一镜尾帧与当前镜首帧时，做亮度/直方图差异比较。
         if prev_last_frame and curr_first_frame:
             diff = _frame_brightness_distance(prev_last_frame, curr_first_frame)
+            threshold = _brightness_threshold()
+            # P0-2：阈值必须写入 metrics，否则 Agent5 落库的 threshold 恒为 NULL。
+            metrics["threshold"] = threshold
             if diff is None:
                 issues.append("无法计算上一镜尾帧与当前镜首帧的亮度差异。")
                 if self.strict:
                     return ContinuityResult(passed=False, issues=issues, metrics=metrics)
             else:
                 metrics["brightness_diff"] = diff
-            if diff is not None and diff > _brightness_threshold():
+            if diff is not None and diff > threshold:
                 issues.append(f"上一镜尾帧与当前镜首帧亮度差异过大（{diff:.2f}），可能存在跳变。")
                 return ContinuityResult(passed=False, issues=issues, metrics=metrics)
         elif prev_last_frame and not curr_first_frame:

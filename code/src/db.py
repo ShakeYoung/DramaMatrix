@@ -163,8 +163,49 @@ def init_db():
             cursor.execute(f"ALTER TABLE agnes_usage ADD COLUMN {column} {definition}")
         except sqlite3.OperationalError:
             pass  # 列已存在
+    # P0-1：迁移旧版 manual_scores——补列、建唯一索引、清理重复数据。
+    # CREATE TABLE IF NOT EXISTS 不会迁移已有表；旧库缺 rubric_version/round/video_sha256
+    # 且无唯一约束，新版插入会报 "no column named rubric_version"。
+    _migrate_manual_scores(cursor)
     conn.commit()
     conn.close()
+
+
+def _migrate_manual_scores(cursor) -> None:
+    """P0-1：把旧版 manual_scores 迁移到新版结构（幂等）。
+
+    - 补列：rubric_version / round / video_sha256
+    - 为已有行填充默认值（rubric_version='v1', round=1）
+    - 清理 (project_id, ep_key, shot_id, scorer) 重复行（保留最新一条）
+    - 建唯一索引（旧表无 UNIQUE 约束，用唯一索引实现同等去重）
+    """
+    existing = {row[1] for row in cursor.execute("PRAGMA table_info(manual_scores)").fetchall()}
+    for column, definition, default in [
+        ("rubric_version", "TEXT DEFAULT 'v1'", "'v1'"),
+        ("round", "INTEGER DEFAULT 1", "1"),
+        ("video_sha256", "TEXT", None),
+    ]:
+        if column not in existing:
+            cursor.execute(f"ALTER TABLE manual_scores ADD COLUMN {column} {definition}")
+            if default is not None:
+                cursor.execute(f"UPDATE manual_scores SET {column} = {default} WHERE {column} IS NULL")
+    # 清理重复评分（同一 project/ep/shot/scorer 保留最新 id），仅当存在重复时执行。
+    cursor.execute(
+        """
+        DELETE FROM manual_scores WHERE id NOT IN (
+            SELECT MAX(id) FROM manual_scores
+            GROUP BY project_id, ep_key, shot_id, scorer
+        )
+        """
+    )
+    # 唯一索引（旧表无 UNIQUE 约束；新表有约束时此索引与约束等价，建索引是幂等的）
+    try:
+        cursor.execute(
+            "CREATE UNIQUE INDEX IF NOT EXISTS uq_manual_scores_dedup "
+            "ON manual_scores(project_id, ep_key, shot_id, scorer)"
+        )
+    except sqlite3.OperationalError:
+        pass
 
 def db_insert_novel(title, url, tags, content):
     conn = sqlite3.connect(DB_PATH)

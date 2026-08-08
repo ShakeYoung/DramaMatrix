@@ -23,6 +23,39 @@ from src.deliverables import record_deliverable
 from src.state import DramaState, EpisodeState, FeedbackLog, GrowthAsset, GrowthMeta
 
 
+def _shot_durations(ep_state: EpisodeState) -> list[float]:
+    """每镜真实时长（优先 asset.actual_duration，回退计划 duration）。"""
+    assets_by_shot = {a.shot_id: a for a in ep_state.video_assets}
+    durations: list[float] = []
+    for shot in ep_state.storyboard_data:
+        asset = assets_by_shot.get(shot.shot_id)
+        real = getattr(asset, "actual_duration", None) if asset else None
+        if real and real > 0:
+            durations.append(float(real))
+        else:
+            import re
+            match = re.search(r"\d+(?:\.\d+)?", shot.duration or "")
+            durations.append(float(match.group()) if match else 4.0)
+    return durations
+
+
+def _shots_in_window(ep_state: EpisodeState, start: float, duration: float) -> list[str]:
+    """P1-6：切片 [start, start+duration) 实际覆盖的镜头清单（按真实时长累进）。"""
+    end = start + duration
+    covered: list[str] = []
+    cursor = 0.0
+    durations = _shot_durations(ep_state)
+    for i, shot in enumerate(ep_state.storyboard_data):
+        shot_end = cursor + (durations[i] if i < len(durations) else 0.0)
+        # 镜头与切片窗口有交集即算覆盖
+        if shot_end > start and cursor < end:
+            covered.append(shot.shot_id)
+        cursor = shot_end
+        if cursor >= end:
+            break
+    return covered
+
+
 def detect_emotion_segments(total_seconds: float, ep_state: EpisodeState) -> list[tuple[str, float, float]]:
     """Return [(name, start, duration)] weighted by storyboard emotion cues.
 
@@ -129,9 +162,9 @@ def process_agent7_growth(state: DramaState) -> DramaState:
                 out_path = growth_dir / f"{ep_key}_{name}.mp4"
                 path = cut_video(master, out_path, start, clip_duration)
                 headline, description, tags = _asset_meta(name, base_meta, total_seconds)
-                # F4：投流切片证据（来源镜头 = 全集成片镜头）
-                record_deliverable(ep_state, kind=f"clip_{name}", path=path,
-                                   source_shots=[s.shot_id for s in ep_state.storyboard_data])
+                # F4/P1-6：投流切片证据——来源镜头按切片起止时间 × 每镜真实时长精确计算。
+                covered = _shots_in_window(ep_state, start, clip_duration)
+                record_deliverable(ep_state, kind=f"clip_{name}", path=path, source_shots=covered)
                 assets.append(
                     GrowthAsset(
                         name=name,
