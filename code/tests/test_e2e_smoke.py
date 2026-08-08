@@ -52,6 +52,8 @@ class EndToEndSmokeTests(unittest.TestCase):
         os.environ["DRAMAMATRIX_ALLOW_NO_CHARACTERS"] = "1"
         # Allow Agent4 mock fallback so the text-model-less smoke can produce shots.
         os.environ["DRAMAMATRIX_ALLOW_MOCK_STORYBOARD"] = "1"
+        # This smoke exercises the loop, not manual review; disable the review gate.
+        os.environ["DRAMAMATRIX_REVIEW_MODE"] = "0"
 
         tmp = tempfile.mkdtemp()
         os.environ["DRAMAMATRIX_OUTPUT_DIR"] = os.path.join(tmp, "out")

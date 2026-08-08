@@ -154,6 +154,7 @@ class EpisodeState(BaseModel):
         "director_rejected",
         "render_failed",
         "video_generated",
+        "awaiting_review",
         "editing_failed",
         "edit_completed",
         "growth_failed",

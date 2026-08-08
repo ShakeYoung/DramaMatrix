@@ -327,6 +327,7 @@ def _render_episode(
                     width=settings.width,
                     height=settings.height,
                     queue_wait_seconds=queue_wait_seconds,
+                    provider=settings.model,
                 )
                 asset = GeneratedVideoAsset(
                     shot_id=shot.shot_id,
@@ -546,6 +547,18 @@ def _render_episode(
             "已标记 render_partial；不会进入 Agent6。解除镜头上限后可 --resume 续跑。"
         )
         return
+    # E1：人工质检点。若开启，生成审阅清单并暂停，等人工标记后再进 Agent6。
+    try:
+        from src.review import review_mode_enabled, write_review_manifest
+        if review_mode_enabled():
+            write_review_manifest(state["project_id"], ep_key, ep_state)
+            ep_state.status = "awaiting_review"
+            _checkpoint(state, ep_key, ep_state)
+            print(f"⏸️ {ep_key} 渲染完成，已生成审阅清单（awaiting_review）。")
+            print("   请运行 python -m src.review_approver <project_id> <ep_key> 标记各镜头后重跑。")
+            return
+    except Exception as exc:
+        print(f"   ⚠️ 生成审阅清单失败（不阻断，进入视频生成）：{exc}")
     ep_state.status = "video_generated"
     _checkpoint(state, ep_key, ep_state)
     print(f"✅ {ep_key} 的 {len(ep_state.video_assets)} 个分镜视频已下载完成。")
@@ -588,7 +601,30 @@ def process_agent5_director(state: DramaState) -> DramaState:
 
     targets = []
     for key, ep in state["episodes"].items():
-        if ep.status not in {
+        if ep.status == "awaiting_review":
+            # E1：人工审阅后——应用 decisions。
+            try:
+                from src.review import pending_shot_ids, load_decisions
+                decisions = load_decisions(state["project_id"], key)
+                for sid, decision in decisions.items():
+                    if decision == "delete":
+                        # 删除该镜：移出其 asset 与 storyboard 条目
+                        ep.storyboard_data = [s for s in ep.storyboard_data if s.shot_id != sid]
+                        ep.video_assets = [a for a in ep.video_assets if a.shot_id != sid]
+                    elif decision == "redraw":
+                        # 重绘：重置其 asset（删除本地已下载文件以触发重新生成）
+                        ep.video_assets = [a for a in ep.video_assets if a.shot_id != sid]
+                # 若仍剩待渲染镜头（有 redraw/未删光），回到渲染重绘
+                if ep.video_assets and pending_shot_ids(state["project_id"], key, ep, decision="redraw"):
+                    ep.status = "storyboard_done"
+                elif not ep.storyboard_data:
+                    # 全部删除 → 无内容，标记失败
+                    ep.status = "render_failed"
+                    print(f"⚠️ {key} 人工审阅后无剩余镜头，标记 render_failed。")
+                    continue
+            except Exception as exc:
+                print(f"   ⚠️ 应用审阅决定失败（{key}）：{exc}")
+        elif ep.status not in {
             "storyboard_done",
             "rendering",
             "render_pending",
@@ -597,6 +633,9 @@ def process_agent5_director(state: DramaState) -> DramaState:
             "waiting_for_agnes_capacity",
             "waiting_for_connectivity",
         }:
+            continue
+        # awaiting_review 若全部 approve 且无 redraw → 放行到 Agent6（不再进渲染）
+        if ep.status == "awaiting_review":
             continue
         targets.append((key, ep))
     if not targets:

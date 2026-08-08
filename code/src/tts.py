@@ -46,9 +46,23 @@ def agnes_voice_enabled() -> bool:
     return os.getenv("DRAMAMATRIX_AGNES_VOICE", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
-def tts_voice() -> str:
-    """Voice id for the chosen TTS provider."""
-    return os.getenv("DRAMAMATRIX_TTS_VOICE", "zh-CN-XiaoxiaoNeural").strip()
+def tts_voice(role: str | None = None) -> str:
+    """Voice id for the chosen TTS provider (E3 role-aware).
+
+    Supports DRAMAMATRIX_TTS_VOICE_MAP (JSON: {"男主": "zh-CN-YunjianNeural", ...})
+    for per-role voices. Falls back to the global DRAMAMATRIX_TTS_VOICE.
+    """
+    import json as _json
+    global_voice = os.getenv("DRAMAMATRIX_TTS_VOICE", "zh-CN-XiaoxiaoNeural").strip()
+    raw = os.getenv("DRAMAMATRIX_TTS_VOICE_MAP", "").strip()
+    if role and raw:
+        try:
+            mapping = _json.loads(raw)
+            if isinstance(mapping, dict) and mapping.get(role):
+                return str(mapping[role])
+        except (_json.JSONDecodeError, AttributeError):
+            pass
+    return global_voice
 
 
 @dataclass(frozen=True)
@@ -59,8 +73,8 @@ class TTSResult:
     segments_built: int  # number of dialogue clips that were synthesized
 
 
-def synthesize_line(text: str, destination: Path) -> Optional[Path]:
-    """Synthesize a single dialogue line to an audio file (G4b).
+def synthesize_line(text: str, destination: Path, role: str | None = None) -> Optional[Path]:
+    """Synthesize a single dialogue line to an audio file (G4b / E3 role voice).
 
     Provider is selected by DRAMAMATRIX_TTS_PROVIDER:
     - 'edge': edge-tts (free, no key). Requires the `edge-tts` package.
@@ -74,20 +88,20 @@ def synthesize_line(text: str, destination: Path) -> Optional[Path]:
     provider = tts_provider()
     try:
         if provider == "edge":
-            return _synthesize_edge(text, destination)
+            return _synthesize_edge(text, destination, role=role)
         if provider == "openai":
-            return _synthesize_openai(text, destination)
+            return _synthesize_openai(text, destination, role=role)
     except Exception as exc:  # noqa: BLE001 - degrade gracefully
         print(f"   [TTS] 合成失败（{provider}）：{exc}")
         return None
     return None
 
 
-def _synthesize_edge(text: str, destination: Path) -> Optional[Path]:
+def _synthesize_edge(text: str, destination: Path, role: str | None = None) -> Optional[Path]:
     """edge-tts synthesis (free, Microsoft Edge online TTS)."""
     import asyncio
     import edge_tts  # type: ignore[import-not-found]
-    voice = tts_voice()
+    voice = tts_voice(role)
 
     async def _run():
         communicate = edge_tts.Communicate(text, voice)
@@ -97,13 +111,15 @@ def _synthesize_edge(text: str, destination: Path) -> Optional[Path]:
     return destination if destination.is_file() and destination.stat().st_size > 0 else None
 
 
-def _synthesize_openai(text: str, destination: Path) -> Optional[Path]:
+def _synthesize_openai(text: str, destination: Path, role: str | None = None) -> Optional[Path]:
     """OpenAI-compatible TTS via configured URL + key."""
     import requests
     url = tts_provider_url() or "https://api.openai.com/v1/audio/speech"
     api_key = os.getenv("DRAMAMATRIX_TTS_API_KEY") or os.getenv("OPENAI_API_KEY", "")
     model = os.getenv("DRAMAMATRIX_TTS_MODEL", "tts-1")
     voice = os.getenv("DRAMAMATRIX_TTS_OPENAI_VOICE", "alloy")
+    if role:
+        voice = tts_voice(role) or voice
     response = requests.post(
         url,
         json={"model": model, "input": text, "voice": voice},
@@ -137,11 +153,17 @@ def build_voiceover(
     destination_dir.mkdir(parents=True, exist_ok=True)
     segments_built = 0
     timed_clips: list[Path] = []
-    for idx, (text, duration) in enumerate(dialogue_segments):
+    for idx, seg in enumerate(dialogue_segments):
+        # E3：支持可选第三元素作为角色音色 (text, duration[, role])
+        if len(seg) >= 3:
+            text, duration, role = seg[0], seg[1], seg[2]
+        else:
+            text, duration = seg[0], seg[1]
+            role = None
         seg_duration = max(float(duration), 0.5)
         if text.strip():
             raw_clip = destination_dir / f"line_{idx:03d}.mp3"
-            if synthesize_line(text, raw_clip):
+            if synthesize_line(text, raw_clip, role=role):
                 timed = _fit_clip_to_duration(raw_clip, seg_duration, destination_dir / f"timed_{idx:03d}.m4a")
                 if timed:
                     timed_clips.append(timed)
@@ -263,4 +285,45 @@ def mix_audio_into_video(video_path: Path, audio_path: Optional[Path], destinati
         subprocess.run(command, check=True, capture_output=True, text=True)
     except subprocess.CalledProcessError as exc:
         raise AgnesVideoError(f"FFmpeg 混音失败: {exc.stderr[-1200:]}") from exc
+    return destination
+
+
+def mix_with_bgm_and_normalize(
+    video_path: Path,
+    voiceover_path: Path,
+    bgm_path: Path,
+    destination: Path,
+) -> Path:
+    """Mix voiceover + BGM and apply loudnorm loudness normalization (E3).
+
+    Audio pipeline: voiceover (dialogue) mixed with BGM bed, then loudnorm
+    standardizes integrated loudness. Returns `destination`, or the input video
+    unchanged if ffmpeg is unavailable (degrade gracefully).
+    """
+    import subprocess
+    try:
+        ffmpeg = _require_binary("ffmpeg")
+    except AgnesVideoError:
+        return video_path
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    # -af: mix voiceover (input 1) with BGM (input 2); BGM volume lowered to bed.
+    # filter='amix=inputs=2:duration=first' keeps dialogue first-channel priority.
+    command = [
+        ffmpeg, "-y",
+        "-i", str(video_path),
+        "-i", str(voiceover_path),
+        "-i", str(bgm_path),
+        "-filter_complex",
+        "[1:a]volume=1.0[vo];[2:a]volume=0.15[bgm];[vo][bgm]amix=inputs=2:duration=first:normalize=0[mix];"
+        "[mix]loudnorm=I=-16:TP=-1.5:LRA=11[outa]",
+        "-map", "0:v", "-map", "[outa]",
+        "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
+        str(destination),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError as exc:
+        print(f"   ⚠️ BGM 混音/响度标准化失败（保留配音版）：{exc.stderr[-300:]}")
+        import shutil
+        shutil.copyfile(video_path, destination)
     return destination

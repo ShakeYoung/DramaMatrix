@@ -158,6 +158,7 @@ def init_db():
         ("cost_estimate", "REAL"),
         ("currency", "TEXT"),
         ("quality_score", "REAL"),
+        ("provider", "TEXT"),  # E5：记录使用哪个视频供应商
     ]:
         try:
             cursor.execute(f"ALTER TABLE agnes_usage ADD COLUMN {column} {definition}")
@@ -189,20 +190,23 @@ def _migrate_manual_scores(cursor) -> None:
             cursor.execute(f"ALTER TABLE manual_scores ADD COLUMN {column} {definition}")
             if default is not None:
                 cursor.execute(f"UPDATE manual_scores SET {column} = {default} WHERE {column} IS NULL")
-    # 清理重复评分（同一 project/ep/shot/scorer 保留最新 id），仅当存在重复时执行。
+    # 清理重复评分（同一 project/ep/shot/scorer/round 保留最新 id），仅当存在重复时执行。
     cursor.execute(
         """
         DELETE FROM manual_scores WHERE id NOT IN (
             SELECT MAX(id) FROM manual_scores
-            GROUP BY project_id, ep_key, shot_id, scorer
+            GROUP BY project_id, ep_key, shot_id, scorer, round
         )
         """
     )
-    # 唯一索引（旧表无 UNIQUE 约束；新表有约束时此索引与约束等价，建索引是幂等的）
+    # 唯一索引（与 UPSERT 冲突目标一致：含 round，否则同 scorer 不同轮次的
+    # 评分会被误去重，且与 ON CONFLICT(...,round) 语义冲突）。
+    # 若存在旧版不含 round 的错误索引，先删除再重建。
+    cursor.execute("DROP INDEX IF EXISTS uq_manual_scores_dedup")
     try:
         cursor.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS uq_manual_scores_dedup "
-            "ON manual_scores(project_id, ep_key, shot_id, scorer)"
+            "ON manual_scores(project_id, ep_key, shot_id, scorer, round)"
         )
     except sqlite3.OperationalError:
         pass
@@ -460,6 +464,7 @@ def db_record_agnes_usage(
     render_seconds: float | None = None,
     download_seconds: float | None = None,
     redraw_count: int = 0,
+    provider: str | None = None,
 ) -> bool:
     """Persist one billed create idempotently. Returns True only for a new task.
 
@@ -471,11 +476,11 @@ def db_record_agnes_usage(
             """
             INSERT OR IGNORE INTO agnes_usage
                 (task_id, project_id, ep_key, shot_id, frames, width, height, created_at_unix,
-                 queue_wait_seconds, render_seconds, download_seconds, redraw_count)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 queue_wait_seconds, render_seconds, download_seconds, redraw_count, provider)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (task_id, project_id, ep_key, shot_id, frames, width, height, created_at_unix,
-             queue_wait_seconds, render_seconds, download_seconds, redraw_count),
+             queue_wait_seconds, render_seconds, download_seconds, redraw_count, provider),
         )
         conn.commit()
         return cursor.rowcount == 1

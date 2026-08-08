@@ -35,6 +35,8 @@ class AgnesUsageRecord:
     render_seconds: Optional[float] = None
     download_seconds: Optional[float] = None
     redraw_count: int = 0
+    # E5：记录使用哪个视频供应商
+    provider: Optional[str] = None
 
 
 @dataclass

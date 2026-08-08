@@ -70,14 +70,46 @@ def route_after_cycles(state: DramaState) -> str:
     return END
 
 
+def _has_review_redraw(project_id, ep) -> bool:
+    """Whether an awaiting_review episode has any .redraw decision (E1)."""
+    try:
+        from src.review import pending_shot_ids
+        return bool(pending_shot_ids(project_id, _ep_key(ep), ep, decision="redraw"))
+    except Exception:
+        return False
+
+
+def _ep_key(ep) -> str:
+    return ep.script_data.ep_id if ep.script_data and ep.script_data.ep_id else "ep"
+
+
+def _review_handled(project_id, ep) -> bool:
+    """True if the episode's review manifest exists and has decisions for all shots."""
+    try:
+        from src.review import all_decided
+        return all_decided(project_id, _ep_key(ep), ep)
+    except Exception:
+        return False
+
+
 def route_from_start(state: DramaState) -> str:
     """Resume a persisted project at its first unfinished stage."""
     episodes = list(state.get("episodes", {}).values())
+    project_id = state.get("project_id")
     if episodes:
         # R2：分镜门禁拦截为最高优先级——即使存在其他 storyboard_done 集，
         # 也不能进入昂贵的视频生成，必须先解决分镜阻塞。
         if any(ep.status == "storyboard_blocked" for ep in episodes):
             print(">> Router: 检测到 storyboard_blocked，恢复中止（需人工修正分镜后重置状态）")
+            return END
+        # E1：人工质检——awaiting_review 若有 .redraw 决定则回 Agent5 重绘；
+        # 未审阅完则暂停；全部 approve 则放行到 Agent6。
+        review_eps = [ep for ep in episodes if ep.status == "awaiting_review"]
+        if review_eps and any(_has_review_redraw(project_id, ep) for ep in review_eps):
+            print(">> Router: 审阅清单存在 .redraw 决定，回 Agent5 重绘。")
+            return "agent5_director"
+        if review_eps and not all(_review_handled(project_id, ep) for ep in review_eps):
+            print(">> Router: 检测到 await review，暂停等待人工标记。")
             return END
         if any(ep.status == "submission_uncertain" for ep in episodes):
             return END
@@ -142,6 +174,10 @@ def route_next_step_for_episode(state: DramaState) -> str:
     # Failed creates are retried only after a new process start, where the
     # connectivity preflight runs again. Never loop POST attempts in one run.
     if any(ep.status == "render_failed" for ep in episodes):
+        return END
+    # E1：运行时若某集进入 await review，暂停本次运行（等人工标记后重跑推进）。
+    if any(ep.status == "awaiting_review" for ep in episodes):
+        print(">> Router: 有剧集等待人工审阅，本次运行暂停。")
         return END
     if any(ep.status == "video_generated" for ep in episodes):
         return "agent6_editor"

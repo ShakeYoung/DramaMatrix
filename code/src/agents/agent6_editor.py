@@ -4,11 +4,16 @@ then attach a voiceover track (TTS) produced from the shots' dialogue.
 
 from pathlib import Path
 
-from src.agnes_video import AgnesVideoError, concat_videos, episode_output_dir, has_audio_stream
+from src.agnes_video import (
+    AgnesVideoError,
+    concat_videos,
+    episode_output_dir,
+    has_dialogue_stream,
+)
 from src.deliverables import record_deliverable
 from src.state import DramaState, EpisodeState, FeedbackLog
 from src.subtitles import build_ass_track, burn_subtitles
-from src.tts import build_voiceover, mix_audio_into_video
+from src.tts import build_voiceover, mix_audio_into_video, mix_with_bgm_and_normalize
 
 
 def process_agent6_editor(state: DramaState) -> DramaState:
@@ -28,15 +33,26 @@ def process_agent6_editor(state: DramaState) -> DramaState:
             # F4：master 证据
             record_deliverable(ep_state, kind="master", path=final_video, source_shots=source_shots)
 
-            # H4：若成片已含音频（Agnes 原生语音成功），保留原音轨，跳过独立 TTS；
-            # 仅在无声时才用独立 TTS 兜底。
+            # H4/E3：若成片含"对白轨"（Agnes 原生对白），保留原音轨并跳过独立 TTS；
+            # 仅对白检测不确定（None）或确认无声时才用独立 TTS 兜底。
+            # has_dialogue_stream 返回 None（缺 ffprobe）时→ 应用 TTS（安全）。
             voiceover = None
-            if has_audio_stream(final_video):
-                print(f"   {ep_key} 成片已含音频（疑似 Agnes 原生语音），保留原音轨。")
+            has_dialogue = has_dialogue_stream(final_video)
+            if has_dialogue:
+                print(f"   {ep_key} 成片检测到对白轨（Agnes 原生语音），保留原音轨。")
             else:
+                print(f"   {ep_key} 未检测到对白轨，启用独立 TTS 配音。")
                 voiceover = _apply_voiceover(ep_state, ep_dir)
             if voiceover:
+                # E3：混音时叠加 BGM（若配置）并做 loudnorm 响度标准化。
                 muxed = mix_audio_into_video(final_video, Path(voiceover), ep_dir / f"{ep_key}_voiced.mp4")
+                if mix_with_bgm_and_normalize is not None:
+                    bgm_path = __import__("os").getenv("DRAMAMATRIX_BGM_PATH", "").strip()
+                    if bgm_path and Path(bgm_path).is_file():
+                        muxed = mix_with_bgm_and_normalize(
+                            final_video, Path(voiceover), Path(bgm_path),
+                            ep_dir / f"{ep_key}_voiced_bgm.mp4",
+                        )
                 ep_state.audio_track = str(voiceover)
                 final_video = muxed
                 # F4：配音版证据

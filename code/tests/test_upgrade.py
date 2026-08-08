@@ -187,7 +187,7 @@ class TTSAlignmentTests(unittest.TestCase):
         segs = [("第一句", 4.0), ("", 4.0), ("第三句", 4.0)]
         with patch.dict(os.environ, {"DRAMAMATRIX_TTS_PROVIDER": "edge",
                                      "DRAMAMATRIX_TTS_ENABLED": "1"}, clear=False), \
-             patch("src.tts.synthesize_line", side_effect=lambda text, dest: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"mp3"), dest)[2]), \
+             patch("src.tts.synthesize_line", side_effect=lambda text, dest, role=None: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"mp3"), dest)[2]), \
              patch("src.tts._fit_clip_to_duration", side_effect=lambda clip, dur, dest: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"fit"), dest)[2]) as fit, \
              patch("src.tts._make_silent_track", side_effect=lambda dur, dest: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"sil"), dest)[2]) as silent, \
              patch("src.tts._concat_audio", return_value=True):

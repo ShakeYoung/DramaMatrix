@@ -48,6 +48,16 @@ def main(argv=None):
     except Exception as exc:
         print(f"⚠️ 运行上下文采集失败（不阻断）：{exc}")
 
+    # E4：按集限定——只处理指定集，便于分批投产（DRAMAMATRIX_EPISODE 或缺省全处理）。
+    episode_filter = os.getenv("DRAMAMATRIX_EPISODE", "").strip()
+    if episode_filter and initial_state_dict.get("episodes"):
+        episodes = initial_state_dict["episodes"]
+        if episode_filter in episodes:
+            initial_state_dict["episodes"] = {episode_filter: episodes[episode_filter]}
+            print(f"→ 按集限定：仅处理 {episode_filter}")
+        else:
+            print(f"⚠️ 指定集 {episode_filter} 不在当前项目中，已忽略该限定。")
+
     # 使用 LangGraph 的 stream 接口或者 invoke 接口运行
     print("==========🚀 开始 DramaMatrix [Agnes 视频生产链路] 🚀==========")
     
@@ -79,6 +89,14 @@ def main(argv=None):
     # P2-2：终态为 blocked_*/waiting_* 时返回非零退出码，便于调度器/守护进程识别未完成。
     if final_status.startswith(("blocked_", "waiting_", "failed")):
         print("⚠️ 流程未正常完成（阻塞/等待/失败），退出码 2。")
+        # E4：写出故障处置清单，替代盲目 --resume。
+        try:
+            from src.failure_report import write_failure_report
+            path = write_failure_report(current_state)
+            if path:
+                print(f"🛠️ 故障处置清单已写出 -> {path}")
+        except Exception as exc:
+            print(f"⚠️ 故障报告写出失败（不阻断）：{exc}")
         return 2
     return 0
     

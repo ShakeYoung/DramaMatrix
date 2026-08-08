@@ -747,6 +747,49 @@ def has_audio_stream(path: Path) -> bool:
         return False
 
 
+def has_dialogue_stream(path: Path) -> Optional[bool]:
+    """Whether the media has a dialogue/speech audio track (E3).
+
+    Distinct from has_audio_stream (any audio incl. BGM/env): this looks for a
+    speech-like audio stream. Heuristic: ffprobe codec is a voice/speech codec
+    (e.g. mp4a with speech profile, opus, named speech) OR stream metadata /
+    tags suggest speech/narration. Returns None when ffprobe is missing so the
+    caller can fall back to "apply TTS" (safe) instead of assuming no speech.
+    """
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe or not path.is_file():
+        return None
+    command = [
+        ffprobe, "-v", "error", "-select_streams", "a",
+        "-show_entries", "stream=codec_name,profile,codec_type:stream_tags=language,title",
+        "-of", "json", str(path),
+    ]
+    try:
+        probe = subprocess.run(command, check=True, capture_output=True, text=True)
+        info = json.loads(probe.stdout or "{}")
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        return None
+    streams = info.get("streams") or []
+    if not streams:
+        return False
+    for s in streams:
+        codec = (s.get("codec_name") or "").lower()
+        profile = (s.get("profile") or "").lower()
+        tags = s.get("tags") or {}
+        title = (tags.get("title") or "").lower()
+        lang = (tags.get("language") or "").lower()
+        # Heuristic: voice-focused codecs / speech titles / mono dialog markers.
+        if codec in {"opus", "mp3", "aac"} and profile in {"speech", "voice"}:
+            return True
+        if any(kw in title for kw in ("语音", "对白", "voice", "speech", "narration", "对话")):
+            return True
+        # Default: a single audio track is usually dialogue in a short drama;
+        # a second music/SFX track we cannot reliably tell apart -> assume speech
+        # only when exactly one audio stream (mono dialog) is present.
+    # Conservative: treat a lone audio stream as dialogue (short-drama norm).
+    return len(streams) == 1
+
+
 def sha256_file(path: Path, chunk_size: int = 65536) -> Optional[str]:
     """Compute the SHA-256 of a file in streamed chunks (V1).
 
@@ -785,6 +828,7 @@ def media_integrity(path: Path) -> dict:
         "bit_rate": None,
         "has_audio": None,
         "audio_duration": None,
+        "has_dialogue": None,
         "probe_ok": None,  # None=ffprobe missing; True=valid; False=corrupt
     }
     ffprobe = shutil.which("ffprobe")
@@ -816,6 +860,7 @@ def media_integrity(path: Path) -> dict:
         except (TypeError, ValueError):
             pass
     result["has_audio"] = has_audio_stream(path)
+    result["has_dialogue"] = has_dialogue_stream(path)  # E3：是否含对白轨
     if result["has_audio"]:
         result["audio_duration"] = result["actual_duration"]
     # P0-3：判定有效性——ffprobe 成功 + 有视频流 + 时长>0。

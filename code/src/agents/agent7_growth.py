@@ -181,6 +181,16 @@ def process_agent7_growth(state: DramaState) -> DramaState:
             ep_state.growth_meta = base_meta
             ep_state.status = "growth_ready"
             print(f"✅ {ep_key} 已导出 {len(assets)} 个情绪段投流切片及发布元数据。")
+            # E2：打包投放包（切片 + 封面 + 元数据），并记入成片交付证据。
+            try:
+                from src.publish import export_publish_package
+                pkg_dir = export_publish_package(state["project_id"], ep_key, ep_state)
+                if pkg_dir:
+                    record_deliverable(ep_state, kind="publish_package", path=pkg_dir.joinpath("publish_meta.json"),
+                                       source_shots=[s.shot_id for s in ep_state.storyboard_data])
+                    print(f"📦 {ep_key} 投放包已导出 -> {pkg_dir}")
+            except Exception as exc:
+                print(f"   ⚠️ 投放包导出失败（不阻断）：{exc}")
         except AgnesVideoError as exc:
             ep_state.status = "growth_failed"
             ep_state.feedback_log.append(

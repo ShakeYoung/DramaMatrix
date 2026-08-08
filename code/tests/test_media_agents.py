@@ -48,9 +48,12 @@ class MediaAgentTests(unittest.TestCase):
         # These tests exercise render mechanics (resume/uncertain/preflight),
         # not character enforcement; bypass the empty-bible gate (P0-B).
         os.environ["DRAMAMATRIX_ALLOW_NO_CHARACTERS"] = "1"
+        # These tests exercise render mechanics, not manual review; disable review gate.
+        os.environ["DRAMAMATRIX_REVIEW_MODE"] = "0"
 
     def tearDown(self):
         os.environ.pop("DRAMAMATRIX_ALLOW_NO_CHARACTERS", None)
+        os.environ.pop("DRAMAMATRIX_REVIEW_MODE", None)
 
     def test_preflight_failure_blocks_all_create_requests(self):
         state = make_state()
