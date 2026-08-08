@@ -18,6 +18,7 @@ def new_project_state(project_id: str) -> dict[str, Any]:
         "task_cycle": 1,
         "scout_attempts": 0,
         "characters": [],
+        "run_context": None,
         "system_status": "starting",
     }
 

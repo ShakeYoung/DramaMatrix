@@ -190,12 +190,20 @@ def conditional_generation_enabled() -> bool:
 
 
 def scene_seed(base: int, scene_id: Optional[str], scene_index: int) -> int:
-    """Stable per-scene seed: same scene => same seed across its shots (P1-C)."""
+    """Stable per-scene seed: same scene => same seed across its shots (P1-C / V1).
+
+    Uses FNV-1a hashing of scene_id (instead of naive char-sum which collides
+    easily) folded into a wide seed space, so distinct scene_ids almost never
+    collide. The index is deliberately not added so all shots in one scene
+    share the same seed.
+    """
     if not scene_id:
         return base + scene_index
-    # Deterministic hash of scene_id folded into the seed space.
-    h = sum(ord(c) for c in scene_id)
-    return base + (h % 1000) + scene_index * 0  # scene-stable; index not added so all shots in scene share
+    h = 2166136261
+    for ch in scene_id.encode("utf-8"):
+        h ^= ch
+        h = (h * 16777619) & 0xFFFFFFFF
+    return base + (h % 100000)
 
 
 def group_by_scene(shots: Sequence[ShotStoryboard]) -> list[list[ShotStoryboard]]:

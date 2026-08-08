@@ -63,6 +63,20 @@ def process_agent6_editor(state: DramaState) -> DramaState:
     return state
 
 
+def _aligned_durations(ep_state: EpisodeState) -> list[float]:
+    """V3：返回每镜真实时长（优先 actual_duration），避免多镜累积漂移。
+
+    按 storyboard 顺序对齐 video_assets；当某镜无真实时长时回退到计划 duration。
+    """
+    assets_by_shot = {a.shot_id: a for a in ep_state.video_assets}
+    durations: list[float] = []
+    for shot in ep_state.storyboard_data:
+        asset = assets_by_shot.get(shot.shot_id)
+        real = getattr(asset, "actual_duration", None) if asset else None
+        durations.append(float(real) if real and real > 0 else _shot_seconds(shot.duration))
+    return durations
+
+
 def _apply_voiceover(ep_state: EpisodeState, ep_dir: Path):
     """Build an independent TTS voiceover track; return its path or None (G4b).
 
@@ -73,9 +87,10 @@ def _apply_voiceover(ep_state: EpisodeState, ep_dir: Path):
     from src.tts import tts_provider
     if not tts_provider():
         return None
+    durations = _aligned_durations(ep_state)
     dialogue_segments = [
-        ((shot.dialogue or "").strip(), _shot_seconds(shot.duration))
-        for shot in ep_state.storyboard_data
+        ((shot.dialogue or "").strip(), durations[i])
+        for i, shot in enumerate(ep_state.storyboard_data)
     ]
     if not any(text for text, _ in dialogue_segments):
         return None
@@ -91,10 +106,12 @@ def _shot_seconds(duration: str) -> float:
 
 def _apply_subtitles(ep_state: EpisodeState, video_path: Path, ep_dir: Path):
     """Assemble and burn shot-dialogue subtitles; return (burned_video, ass_path) or None."""
+    # V3：以真实时长（actual_duration）驱动字幕时间窗，避免多镜后漂移。
+    durations = _aligned_durations(ep_state)
     segments = []  # (text, start_seconds, duration_seconds)
     cursor = 0.0
-    for shot in ep_state.storyboard_data:
-        duration = _shot_seconds(shot.duration)
+    for i, shot in enumerate(ep_state.storyboard_data):
+        duration = durations[i]
         text = (shot.dialogue or "").strip()
         segments.append((text, cursor, duration))
         cursor += duration

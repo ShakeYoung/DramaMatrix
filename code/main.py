@@ -41,6 +41,13 @@ def main(argv=None):
     else:
         initial_state_dict = new_project_state(project_id)
 
+    # V4：每次运行采集运行上下文（git sha/配置/依赖版本），随状态持久化用于复现与审计。
+    try:
+        from src.run_context import capture_run_context
+        initial_state_dict["run_context"] = capture_run_context()
+    except Exception as exc:
+        print(f"⚠️ 运行上下文采集失败（不阻断）：{exc}")
+
     # 使用 LangGraph 的 stream 接口或者 invoke 接口运行
     print("==========🚀 开始 DramaMatrix [Agnes 视频生产链路] 🚀==========")
     

@@ -747,6 +747,95 @@ def has_audio_stream(path: Path) -> bool:
         return False
 
 
+def sha256_file(path: Path, chunk_size: int = 65536) -> Optional[str]:
+    """Compute the SHA-256 of a file in streamed chunks (V1).
+
+    Returns None if the file cannot be read. Chunked read keeps memory flat for
+    large media files.
+    """
+    import hashlib
+    if not path.is_file():
+        return None
+    digest = hashlib.sha256()
+    try:
+        with path.open("rb") as handle:
+            for chunk in iter(lambda: handle.read(chunk_size), b""):
+                digest.update(chunk)
+    except OSError:
+        return None
+    return digest.hexdigest()
+
+
+def media_integrity(path: Path) -> dict:
+    """Probe a media file for integrity + real parameters (V1).
+
+    Returns a dict with: sha256, file_size_bytes, actual_duration, width,
+    height, frame_rate, bit_rate, has_audio, audio_duration. When ffprobe is
+    unavailable, degrades to sha256 + size only (no probe fields), so the main
+    pipeline never blocks on a missing binary.
+    """
+    result: dict = {
+        "sha256": sha256_file(path),
+        "file_size_bytes": path.stat().st_size if path.is_file() else 0,
+        "actual_duration": None,
+        "width": None,
+        "height": None,
+        "frame_rate": None,
+        "bit_rate": None,
+        "has_audio": None,
+        "audio_duration": None,
+    }
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe or not path.is_file():
+        return result
+    # One ffprobe call for format + video stream + audio stream.
+    command = [
+        ffprobe, "-v", "error",
+        "-select_streams", "v:0",
+        "-show_entries", "stream=width,height,r_frame_rate,bit_rate:format=duration",
+        "-of", "json", str(path),
+    ]
+    try:
+        probe = subprocess.run(command, check=True, capture_output=True, text=True)
+        info = json.loads(probe.stdout or "{}")
+    except (subprocess.CalledProcessError, json.JSONDecodeError):
+        info = {}
+    streams = info.get("streams") or []
+    fmt = info.get("format") or {}
+    if streams:
+        s = streams[0]
+        result["width"] = _safe_int(s.get("width"))
+        result["height"] = _safe_int(s.get("height"))
+        result["frame_rate"] = _parse_frac(s.get("r_frame_rate"))
+        result["bit_rate"] = _safe_int(s.get("bit_rate"))
+    if "duration" in fmt:
+        try:
+            result["actual_duration"] = float(fmt["duration"])
+        except (TypeError, ValueError):
+            pass
+    result["has_audio"] = has_audio_stream(path)
+    if result["has_audio"]:
+        result["audio_duration"] = result["actual_duration"]
+    return result
+
+
+def _safe_int(value) -> Optional[int]:
+    try:
+        return int(value) if value is not None else None
+    except (TypeError, ValueError):
+        return None
+
+
+def _parse_frac(value) -> Optional[float]:
+    if not value:
+        return None
+    parts = str(value).split("/")
+    try:
+        return float(parts[0]) / float(parts[1]) if len(parts) == 2 and float(parts[1]) else float(parts[0])
+    except (TypeError, ValueError, ZeroDivisionError):
+        return None
+
+
 def cut_video(source: Path, destination: Path, start_seconds: float, duration_seconds: float) -> Path:
     ffmpeg = _require_binary("ffmpeg")
     destination.parent.mkdir(parents=True, exist_ok=True)

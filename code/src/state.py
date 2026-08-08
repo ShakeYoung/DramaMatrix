@@ -85,6 +85,23 @@ class GeneratedVideoAsset(BaseModel):
     remote_url: Optional[str] = None
     local_path: Optional[str] = None
     error: Optional[str] = None
+    # V1：完整性与版本证据（全 Optional，旧快照可平滑恢复）
+    sha256: Optional[str] = Field(default=None, description="本地文件 SHA-256")
+    file_size_bytes: Optional[int] = Field(default=None, description="文件大小（字节）")
+    actual_duration: Optional[float] = Field(default=None, description="ffprobe 实测时长（秒）")
+    width: Optional[int] = Field(default=None)
+    height: Optional[int] = Field(default=None)
+    frame_rate: Optional[float] = Field(default=None)
+    bit_rate: Optional[int] = Field(default=None)
+    has_audio: Optional[bool] = Field(default=None, description="是否含音轨")
+    audio_duration: Optional[float] = Field(default=None)
+    seed: Optional[int] = Field(default=None, description="实际使用的 seed")
+    negative_prompt: Optional[str] = Field(default=None)
+    reference_image_url: Optional[str] = Field(default=None, description="使用的参考图 URL/data URI")
+    reference_image_sha256: Optional[str] = Field(default=None)
+    model_version: Optional[str] = Field(default=None, description="Agnes 模型版本")
+    downloaded_at: Optional[float] = Field(default=None, description="下载完成 unix 时间戳")
+    agnes_response_summary: Optional[Dict[str, Any]] = Field(default=None, description="Agnes 原始响应摘要")
 
 
 class GrowthAsset(BaseModel):
@@ -149,6 +166,8 @@ class EpisodeState(BaseModel):
     # 调试/受控渲染可能只生成分镜子集；记录实际完成进度，禁止误入 Agent6。
     rendered_shot_count: int = Field(default=0)
     planned_shot_count: int = Field(default=0)
+    # V1：实际渲染的镜头资产（含哈希/真实媒体参数/seed/参考图等完整性证据）
+    rendered_assets: List[GeneratedVideoAsset] = Field(default_factory=list)
 
 
 class MarketFeedback(BaseModel):
@@ -188,6 +207,9 @@ class DramaState(TypedDict):
     
     # 全剧角色一致性表（阶段3）：由 Agent 3 抽取，Agent 4/5 注入生成提示
     characters: List[CharacterSheet]
+
+    # V4：运行上下文（git sha/配置快照/依赖版本），随状态持久化用于复现
+    run_context: Optional[Dict[str, Any]]
 
     # 全局系统卡点状态 (如 starting, drafting, blocked, done)
     system_status: str

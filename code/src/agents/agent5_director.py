@@ -185,7 +185,7 @@ def _render_episode(
         scene_segments,
     )
     from src.continuity_qc import get_checker
-    from src.agnes_video import extract_first_frame, extract_last_frame, frame_to_data_uri
+    from src.agnes_video import extract_first_frame, extract_last_frame, frame_to_data_uri, media_integrity
     from src.render_concurrency import CapacityThrottle, max_in_flight
     from src.tts import agnes_voice_enabled
     character_block = render_character_block(state.get("characters", []))
@@ -262,7 +262,19 @@ def _render_episode(
                     ref = prepare_shot_reference(shot, scene_references, previous_tail_reference)
                     if ref.get("image_url"):
                         create_kwargs["image_url"] = ref["image_url"]
-                        print(f"   [{ep_key}/{shot.shot_id}] 携带参考图（{'上一镜尾帧' if previous_tail_reference else '场景参考'}）。")
+                        ref_source = "上一镜尾帧" if previous_tail_reference else "场景参考"
+                        print(f"   [{ep_key}/{shot.shot_id}] 携带参考图（{ref_source}）。")
+                        # V5：记录参考资产引用链（哪一镜引用了哪张参考图）。
+                        try:
+                            from src.db import db_insert_reference_asset
+                            db_insert_reference_asset(
+                                project_id=state["project_id"],
+                                asset_type="tail_frame" if previous_tail_reference else "scene",
+                                ref_id=shot.scene_id or "tail",
+                                referenced_by_shot=shot.shot_id,
+                            )
+                        except Exception:
+                            pass
                 # G4a：Agnes 原生语音——把对白作为旁白传给 Agnes（字段名可配）。
                 # 是否被接受需服务器端验证；Agent6 会检测无声并回退独立 TTS。
                 if agnes_voice_enabled() and (shot.dialogue or "").strip():
@@ -290,6 +302,12 @@ def _render_episode(
                     task_id=task_id,
                     status="submitted",
                     prompt=prompt,
+                    # V1：记录实际生成条件与版本证据，便于复现与审计
+                    seed=create_kwargs.get("seed"),
+                    negative_prompt=NEGATIVE_PROMPT,
+                    model_version=settings.model,
+                    reference_image_url=create_kwargs.get("image_url"),
+                    agnes_response_summary={k: str(v)[:200] for k, v in created.items() if k in ("video_id", "task_id", "id", "status", "model")},
                 )
                 ep_state.video_assets.append(asset)
                 assets_by_shot[shot.shot_id] = asset
@@ -313,6 +331,22 @@ def _render_episode(
             )
             asset.status = "completed"
             asset.local_path = str(local_path)
+            # V1：下载完成后采集文件哈希与真实媒体参数（时长/分辨率/帧率/音轨），
+            # 作为完整性证据与 V3 真实时长驱动时间轴的数据源。
+            try:
+                integrity = media_integrity(Path(local_path))
+                asset.sha256 = integrity.get("sha256")
+                asset.file_size_bytes = integrity.get("file_size_bytes")
+                asset.actual_duration = integrity.get("actual_duration")
+                asset.width = integrity.get("width")
+                asset.height = integrity.get("height")
+                asset.frame_rate = integrity.get("frame_rate")
+                asset.bit_rate = integrity.get("bit_rate")
+                asset.has_audio = integrity.get("has_audio")
+                asset.audio_duration = integrity.get("audio_duration")
+                asset.downloaded_at = time.time()
+            except Exception as exc:
+                print(f"   ⚠️ 媒体完整性采集失败（不阻断）：{exc}")
             _checkpoint(state, ep_key, ep_state)
             # R3：正确的质检顺序——提取当前镜首帧，与上一镜尾帧比较；通过后再提取
             # 当前镜尾帧供下一镜使用。质检用合法本地路径，不用 data URI。
@@ -347,6 +381,26 @@ def _render_episode(
             if qc_result.metrics:
                 metric_text = ", ".join(f"{k}={v:.3f}" for k, v in qc_result.metrics.items())
                 print(f"   [{ep_key}/{shot.shot_id}] QC 指标：{metric_text}")
+            # V2：把质检结果沉淀为结构化实验数据（含指标、首尾帧哈希），便于跨镜/跨集分析。
+            try:
+                from src.agnes_video import sha256_file
+                from src.db import db_insert_qc_result
+                db_insert_qc_result(
+                    project_id=state["project_id"],
+                    ep_key=ep_key,
+                    shot_id=shot.shot_id,
+                    passed=qc_result.passed,
+                    brightness_diff=qc_result.metrics.get("brightness_diff"),
+                    threshold=qc_result.metrics.get("threshold"),
+                    issues=qc_result.issues,
+                    metrics=qc_result.metrics,
+                    storyboard_version=ep_state.storyboard_version,
+                    redraw_attempt=sum(1 for fb in ep_state.feedback_log if fb.reason_code == "QC_REDRAW" and shot.shot_id in (fb.message or "")),
+                    prev_tail_sha256=sha256_file(previous_tail_path) if previous_tail_path else None,
+                    curr_head_sha256=sha256_file(current_first_frame) if current_first_frame else None,
+                )
+            except Exception as exc:
+                print(f"   ⚠️ 质检结果沉淀失败（不阻断）：{exc}")
             # 质检通过：提取当前镜尾帧，更新两条轨道供下一镜。
             if index < len(shots):
                 frame_path = shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}_tail.png"
