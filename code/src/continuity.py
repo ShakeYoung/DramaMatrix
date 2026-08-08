@@ -216,6 +216,25 @@ def group_by_scene(shots: Sequence[ShotStoryboard]) -> list[list[ShotStoryboard]
     return groups
 
 
+def scene_segments(shots: Sequence[ShotStoryboard]) -> list[tuple[int, int, Optional[str]]]:
+    """Return (start_index, end_index_exclusive, scene_id) for each consecutive
+    scene segment (G1). Indices are 0-based over `shots`. Segments are the units
+    of cross-scene concurrency; within a segment shots stay serial.
+    """
+    segments: list[tuple[int, int, Optional[str]]] = []
+    if not shots:
+        return segments
+    seg_start = 0
+    current_scene = shots[0].scene_id
+    for i in range(1, len(shots)):
+        if shots[i].scene_id != current_scene:
+            segments.append((seg_start, i, current_scene))
+            seg_start = i
+            current_scene = shots[i].scene_id
+    segments.append((seg_start, len(shots), current_scene))
+    return segments
+
+
 def prepare_shot_reference(
     shot: ShotStoryboard,
     scene_references: dict[str, str],

@@ -8,4 +8,7 @@ pydantic>=2.10,<3.0
 python-dotenv>=1.0,<2.0
 requests>=2.32,<3.0
 
+# Optional: independent TTS voiceover (G4b). Install when using DRAMAMATRIX_TTS_PROVIDER=edge.
+edge-tts>=6.1,<7.0
+
 # Video stitching also requires the ffmpeg and ffprobe executables on PATH.

@@ -7,7 +7,7 @@ from pathlib import Path
 from src.agnes_video import AgnesVideoError, concat_videos, episode_output_dir
 from src.state import DramaState, EpisodeState, FeedbackLog
 from src.subtitles import build_ass_track, burn_subtitles
-from src.tts import build_voiceover, mix_audio_into_video, tts_provider_url
+from src.tts import build_voiceover, mix_audio_into_video
 
 
 def process_agent6_editor(state: DramaState) -> DramaState:
@@ -61,9 +61,14 @@ def process_agent6_editor(state: DramaState) -> DramaState:
 
 
 def _apply_voiceover(ep_state: EpisodeState, ep_dir: Path):
-    """Build a voiceover track for the shots; return its path or None."""
-    if not tts_provider_url():
-        # No TTS endpoint configured: skip voiceover entirely (keep master audio).
+    """Build an independent TTS voiceover track; return its path or None (G4b).
+
+    Used as the fallback when Agnes native voice is off or produced a silent
+    clip. Returns None when no TTS provider is configured (the master keeps its
+    own audio, which may carry Agnes-generated speech if AGNES_VOICE is on).
+    """
+    from src.tts import tts_provider
+    if not tts_provider():
         return None
     dialogue_segments = [
         ((shot.dialogue or "").strip(), _shot_seconds(shot.duration))

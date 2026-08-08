@@ -454,6 +454,8 @@ class AgnesVideoClient:
         image_url: Optional[str] = None,
         last_frame: Optional[str] = None,
         last_frame_url: Optional[str] = None,
+        voice_prompt: Optional[str] = None,
+        narration: Optional[str] = None,
     ) -> dict[str, Any]:
         payload = {
             "model": self.settings.model,
@@ -479,6 +481,14 @@ class AgnesVideoClient:
             payload[last_frame_field] = last_frame
         if last_frame_url:
             payload[last_frame_url_field] = last_frame_url
+        # G4a：Agnes 原生语音/旁白探测（字段名可配）。仅在显式传入时注入；
+        # 是否被 Agnes 接受需服务器端联调验证，失败则由 Agent6 的独立 TTS 兜底。
+        voice_field = os.getenv("AGNES_VOICE_PROMPT_FIELD", "voice_prompt")
+        narration_field = os.getenv("AGNES_NARRATION_FIELD", "narration")
+        if voice_prompt:
+            payload[voice_field] = voice_prompt
+        if narration:
+            payload[narration_field] = narration
         result = self._request_json(
             "POST", f"{self.settings.base_url}/videos", payload, stage="create"
         )

@@ -182,13 +182,19 @@ def _render_episode(
         load_scene_references,
         prepare_shot_reference,
         scene_seed,
+        scene_segments,
     )
     from src.continuity_qc import get_checker
     from src.agnes_video import extract_first_frame, extract_last_frame, frame_to_data_uri
+    from src.render_concurrency import CapacityThrottle, max_in_flight
+    from src.tts import agnes_voice_enabled
     character_block = render_character_block(state.get("characters", []))
     conditional = conditional_generation_enabled()
     # R8：加载场景参考图映射（部署时预生成角色/场景参考图并注册）。
     scene_references: dict[str, str] = load_scene_references()
+    # G1：跨场景共享的容量节流器——任一 queue_full 即降级，成功创建即恢复。
+    throttle = CapacityThrottle()
+    in_flight = max_in_flight()
     if not is_resume:
         ep_state.video_assets = []
     assets_by_shot = {asset.shot_id: asset for asset in ep_state.video_assets}
@@ -235,6 +241,12 @@ def _render_episode(
                     _checkpoint(state, ep_key, ep_state)
                     print(f"⚠️ {ep_key} 已达 Agnes 创建次数预算上限（{tracker.max_creates}），熔断新任务。")
                     return
+                # G1：跨场景节流——若已被 queue_full 降级，等待容量恢复再提交。
+                if in_flight > 1 and not throttle.acquire_create():
+                    ep_state.status = "waiting_for_agnes_capacity"
+                    _checkpoint(state, ep_key, ep_state)
+                    print(f"⏸️ {ep_key}/{shot.shot_id} Agnes 容量降级中，等待恢复后重试。")
+                    return
                 # P1-C：条件输入。同场景首镜用场景参考图；后续镜用上一镜尾帧。
                 create_kwargs = dict(
                     prompt=prompt,
@@ -247,7 +259,15 @@ def _render_episode(
                     if ref.get("image_url"):
                         create_kwargs["image_url"] = ref["image_url"]
                         print(f"   [{ep_key}/{shot.shot_id}] 携带参考图（{'上一镜尾帧' if previous_tail_reference else '场景参考'}）。")
+                # G4a：Agnes 原生语音——把对白作为旁白传给 Agnes（字段名可配）。
+                # 是否被接受需服务器端验证；Agent6 会检测无声并回退独立 TTS。
+                if agnes_voice_enabled() and (shot.dialogue or "").strip():
+                    create_kwargs["narration"] = (shot.dialogue or "").strip()
                 created = client.create_video(**create_kwargs)
+                # G1：成功创建说明容量已恢复，清除降级标记并释放槽位。
+                if in_flight > 1:
+                    throttle.report_success()
+                    throttle.release_create()
                 created_video_id = created.get("video_id")
                 video_id = str(created_video_id or created.get("task_id") or created["id"])
                 task_id = str(created.get("task_id") or created.get("id") or video_id)
@@ -342,6 +362,10 @@ def _render_episode(
         except AgnesQueueFull as exc:
             # P0-1/P0-2/R10：队列满/限流是可恢复的——只暂停当前集，记录 next_retry_at，
             # 等待后重试当前镜，不标记 render_failed，也不让其他集立即重入。
+            # G1：通知跨场景节流器降级，让并发中的其他场景也暂停新提交。
+            if in_flight > 1:
+                throttle.report_queue_full()
+                throttle.release_create()
             ep_state.status = "waiting_for_agnes_capacity"
             ep_state.queue_retry_count = int(ep_state.queue_retry_count or 0) + 1
             # 退避：60s × 2^(retry-1)，上限 600s。

@@ -26,29 +26,41 @@ def detect_emotion_segments(total_seconds: float, ep_state: EpisodeState) -> lis
     """Return [(name, start, duration)] weighted by storyboard emotion cues.
 
     Without a vision model, we approximate "high-emotion" windows from the
-    narrative: the hook (opening suspense) and the climax (ending hook). Env
-    DRAMAMATRIX_GROWTH_CLIP_DURATION controls each slice length. This is pure
-    geometry over the storyboard; a real vision classifier can replace it later.
+    narrative: the hook (opening suspense) and the climax (ending hook).
+
+    G2 controls:
+    - DRAMAMATRIX_GROWTH_CLIP_COUNT (default 2): how many slices to export.
+      Set to 1 to export only the hook (opening) teaser.
+    - DRAMAMATRIX_GROWTH_CLIP_DURATION (default 15): hook slice length.
+    - DRAMAMATRIX_GROWTH_CLIMAX_DURATION (default 0): climax slice length; 0
+      means inherit GROWTH_CLIP_DURATION. The climax is anchored at the LAST
+      storyboard shot (the ending hook) rather than the raw file tail, and is
+      shortened so it does not overrun the episode end.
     """
-    clip_duration = min(
+    hook_duration = min(
         float(os.getenv("DRAMAMATRIX_GROWTH_CLIP_DURATION", "15")),
         max(total_seconds, 1.0),
     )
+    clip_count = int(os.getenv("DRAMAMATRIX_GROWTH_CLIP_COUNT", "2"))
     if total_seconds <= 0:
         return []
-    climax_start = max(0.0, total_seconds - clip_duration)
-    # Prefer the "climax" that begins at the last storyboard shot window for a
-    # genuine cliff-hanger, otherwise fall back to the tail.
+
+    segments: list[tuple[str, float, float]] = [("hook", 0.0, hook_duration)]
+    if clip_count < 2:
+        return segments
+
+    # Climax: anchor at the last storyboard shot window, shortened to fit.
+    climax_duration_raw = float(os.getenv("DRAMAMATRIX_GROWTH_CLIMAX_DURATION", "0") or 0)
+    climax_duration = min(climax_duration_raw or hook_duration, hook_duration)
+    climax_duration = min(climax_duration, max(total_seconds, 1.0))
+    last_shot_start = max(0.0, total_seconds - climax_duration)
     if ep_state.storyboard_data:
-        # Rough per-shot budget (mean) to estimate where the ending hook lands.
         mean = total_seconds / max(len(ep_state.storyboard_data), 1)
         last_start = mean * (len(ep_state.storyboard_data) - 1)
-        if last_start > 0 and last_start + clip_duration <= total_seconds + 0.5:
-            climax_start = max(0.0, last_start)
-    return [
-        ("hook", 0.0, clip_duration),
-        ("climax", climax_start, clip_duration),
-    ]
+        if last_start > 0:
+            last_shot_start = max(0.0, min(last_start, total_seconds - climax_duration))
+    segments.append(("climax", last_shot_start, climax_duration))
+    return segments
 
 
 def build_growth_meta(ep_state: EpisodeState, genre_tags: list[str] | None = None) -> GrowthMeta:
