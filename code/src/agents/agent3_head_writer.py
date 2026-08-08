@@ -1,4 +1,6 @@
 # /Users/yangkang/Library/CloudStorage/OneDrive-共享的库-onedrive/own_project/DramaMatrix/code/src/agents/agent3_head_writer.py
+import os
+
 from pydantic import BaseModel, Field
 from typing import List
 from src.state import DramaState, EpisodeState, EpisodeScriptData
@@ -67,10 +69,12 @@ def process_agent3_head_writer(state: DramaState) -> DramaState:
         
         # P1-4：总镜头预算门禁，避免一次规划过多集导致成本与失败面过大。
         # 每集约需 min_shots 个镜头，按预算反推可规划的集数上限。
-        import os
         total_budget = int(os.getenv("DRAMAMATRIX_MAX_TOTAL_SHOTS", "120"))
         min_shots_per_ep = int(os.getenv("DRAMAMATRIX_MIN_SHOTS_PER_EPISODE", "12"))
         ep_cap = max(1, total_budget // max(min_shots_per_ep, 1))
+        max_episodes = int(os.getenv("DRAMAMATRIX_MAX_EPISODES", "0") or 0)
+        if max_episodes > 0:
+            ep_cap = min(ep_cap, max_episodes)
         planned_episodes = result.episodes[:ep_cap]
         if len(result.episodes) > ep_cap:
             print(f"   ⚠️ 总镜头预算 {total_budget}：原计划 {len(result.episodes)} 集，截断为前 {ep_cap} 集。")
@@ -114,8 +118,14 @@ def process_agent3_head_writer(state: DramaState) -> DramaState:
             outline="豪车内，死对头递给女主一份对赌协议。女主换装重返宴会打脸男主。",
             ending_hook="原配男主看到焕然一新的女主，震惊地摔碎了酒杯..."
         )
-        state["episodes"]["ep_01"] = EpisodeState(status="script_done", script_data=ep_01_script)
-        state["episodes"]["ep_02"] = EpisodeState(status="script_done", script_data=ep_02_script)
+        fallback_episodes = [ep_01_script, ep_02_script]
+        max_episodes = int(os.getenv("DRAMAMATRIX_MAX_EPISODES", "0") or 0)
+        if max_episodes > 0:
+            fallback_episodes = fallback_episodes[:max_episodes]
+        for fallback in fallback_episodes:
+            state["episodes"][fallback.ep_id] = EpisodeState(
+                status="script_done", script_data=fallback
+            )
         print("✅ 使用内建兜底方案生成了全剧拆解与前两集大纲。")
 
     state["system_status"] = "ready_for_storyboard"

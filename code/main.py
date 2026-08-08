@@ -17,9 +17,9 @@ def main(argv=None):
     apply_runtime_options(parse_runtime_options(argv))
     if not os.getenv("AGNES_API_KEY"):
         # 不再硬阻塞：允许纯文本阶段（选品/立项/编剧/分镜）先行运行，
-        # 视频生成阶段 Agent 5 会在缺少密钥时优雅地进入 render_failed。
+        # 视频生成阶段 Agent 5 会在缺少密钥时进入可恢复的配置阻塞状态。
         print("⚠️ 未检测到 AGNES_API_KEY。纯文本阶段（选品→分镜）仍可运行；")
-        print("   视频生成阶段（Agent 5）将进入 render_failed，需配置密钥后重跑。")
+        print("   视频生成阶段（Agent 5）将阻塞，配置密钥后可直接 --resume。")
     if os.getenv("DRAMAMATRIX_AGNES_PREFLIGHT_ONLY") == "1":
         try:
             AgnesVideoClient(AgnesVideoSettings.from_environment()).preflight()

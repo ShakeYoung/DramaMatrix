@@ -144,6 +144,113 @@ class MediaAgentTests(unittest.TestCase):
             self.assertEqual(len(episode.growth_assets), 2)
             self.assertTrue(all(Path(asset.path).is_file() for asset in episode.growth_assets))
 
+    def test_shot_cap_marks_partial_and_never_routes_to_editor(self):
+        from src.graph import route_from_start, route_next_step_for_episode
+
+        state = make_state()
+        state["episodes"]["ep_01"].storyboard_data.append(
+            ShotStoryboard(
+                shot_id="s02",
+                camera="Static wide shot",
+                visual_prompt="The woman walks away.",
+                dialogue="",
+                duration="5s",
+                audio="soft rain",
+            )
+        )
+        settings = AgnesVideoSettings(api_key="test-key", max_shots_per_episode=1)
+        client = MagicMock()
+        client.create_video.return_value = {
+            "video_id": "video_partial_1",
+            "task_id": "task_partial_1",
+        }
+        client.wait_for_video.return_value = {
+            "status": "completed",
+            "metadata": {"url": "https://example.test/partial.mp4"},
+        }
+
+        def fake_download(remote_url, destination):
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            destination.write_bytes(b"video")
+            return destination
+
+        client.download_video.side_effect = fake_download
+        with tempfile.TemporaryDirectory() as directory, patch.dict(
+            os.environ, {"DRAMAMATRIX_OUTPUT_DIR": directory}, clear=False
+        ), patch(
+            "src.agents.agent5_director.AgnesVideoSettings.from_environment",
+            return_value=settings,
+        ), patch(
+            "src.agents.agent5_director.AgnesVideoClient", return_value=client
+        ), patch("src.agents.agent5_director.db_save_project_state"):
+            process_agent5_director(state)
+
+        episode = state["episodes"]["ep_01"]
+        self.assertEqual(episode.status, "render_partial")
+        self.assertEqual(episode.rendered_shot_count, 1)
+        self.assertEqual(episode.planned_shot_count, 2)
+        self.assertEqual(state["system_status"], "waiting_for_full_render")
+        self.assertEqual(route_next_step_for_episode(state), "__end__")
+        self.assertEqual(route_from_start(state), "agent5_director")
+
+    def test_active_backoff_blocks_submissions_for_other_episodes(self):
+        import time
+
+        state = make_state()
+        waiting = state["episodes"]["ep_01"]
+        waiting.status = "waiting_for_agnes_capacity"
+        waiting.next_retry_at = time.time() + 300
+        state["episodes"]["ep_02"] = waiting.model_copy(deep=True)
+        state["episodes"]["ep_02"].status = "storyboard_done"
+        state["episodes"]["ep_02"].next_retry_at = 0
+
+        with patch(
+            "src.agents.agent5_director.AgnesVideoSettings.from_environment"
+        ) as settings_loader:
+            process_agent5_director(state)
+
+        settings_loader.assert_not_called()
+        self.assertEqual(state["episodes"]["ep_02"].status, "storyboard_done")
+        self.assertEqual(state["system_status"], "waiting_for_agnes_capacity")
+
+    def test_qc_redraw_archives_rejected_video_and_frames(self):
+        from src.agents.agent5_director import _mark_shot_for_redraw
+
+        with tempfile.TemporaryDirectory() as directory:
+            shot_directory = Path(directory)
+            video = shot_directory / "001_s01.mp4"
+            head = shot_directory / "001_s01_head.png"
+            tail = shot_directory / "001_s01_tail.png"
+            for path in (video, head, tail):
+                path.write_bytes(b"rejected")
+            episode = make_state()["episodes"]["ep_01"]
+            episode.video_assets = [
+                GeneratedVideoAsset(
+                    shot_id="s01",
+                    video_id="v1",
+                    task_id="t1",
+                    status="completed",
+                    prompt="p",
+                    local_path=str(video),
+                )
+            ]
+
+            _mark_shot_for_redraw(
+                episode,
+                "s01",
+                ["brightness jump"],
+                AgnesVideoSettings(api_key="test-key", max_revisions=2),
+                shot_directory=shot_directory,
+                shot_index=1,
+            )
+
+            archive = shot_directory / "rejected" / "s01" / "attempt_1"
+            self.assertTrue((archive / video.name).is_file())
+            self.assertTrue((archive / head.name).is_file())
+            self.assertTrue((archive / tail.name).is_file())
+            self.assertFalse(episode.video_assets)
+            self.assertEqual(episode.status, "storyboard_done")
+
     def test_submitted_task_is_checkpointed_and_resumed_without_recreation(self):
         state = make_state()
         settings = AgnesVideoSettings(api_key="test-key", max_shots_per_episode=1)

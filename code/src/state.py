@@ -114,6 +114,7 @@ class EpisodeState(BaseModel):
         "storyboard_done",
         "rendering",
         "render_pending",
+        "render_partial",
         "submission_uncertain",
         "waiting_for_agnes_capacity",
         "waiting_for_connectivity",
@@ -145,6 +146,9 @@ class EpisodeState(BaseModel):
     next_retry_at: float = Field(default=0.0)
     queue_retry_count: int = Field(default=0)
     last_queue_error: Optional[str] = Field(default=None)
+    # 调试/受控渲染可能只生成分镜子集；记录实际完成进度，禁止误入 Agent6。
+    rendered_shot_count: int = Field(default=0)
+    planned_shot_count: int = Field(default=0)
 
 
 class MarketFeedback(BaseModel):

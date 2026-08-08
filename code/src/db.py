@@ -57,6 +57,24 @@ def init_db():
         recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     ''')
+    # Agnes 创建事实以 task_id 幂等落库。CSV 只作为可读报表，不能承担预算真相源；
+    # 即使输出目录被移动/删除，项目创建预算仍可正确恢复。
+    cursor.execute('''
+    CREATE TABLE IF NOT EXISTS agnes_usage (
+        task_id TEXT PRIMARY KEY,
+        project_id TEXT NOT NULL,
+        ep_key TEXT,
+        shot_id TEXT,
+        frames INTEGER,
+        width INTEGER,
+        height INTEGER,
+        created_at_unix REAL,
+        recorded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    ''')
+    cursor.execute(
+        "CREATE INDEX IF NOT EXISTS idx_agnes_usage_project ON agnes_usage(project_id)"
+    )
     conn.commit()
     conn.close()
 
@@ -115,6 +133,46 @@ def db_insert_run_log(project_id, node, system_status, cycle=None, event="transi
             (project_id, node, system_status, cycle, event, level),
         )
         conn.commit()
+    finally:
+        conn.close()
+
+
+def db_record_agnes_usage(
+    *,
+    task_id: str,
+    project_id: str,
+    ep_key: str,
+    shot_id: str,
+    frames: int,
+    width: int,
+    height: int,
+    created_at_unix: float | None = None,
+) -> bool:
+    """Persist one billed create idempotently. Returns True only for a new task."""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        cursor = conn.execute(
+            """
+            INSERT OR IGNORE INTO agnes_usage
+                (task_id, project_id, ep_key, shot_id, frames, width, height, created_at_unix)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
+            (task_id, project_id, ep_key, shot_id, frames, width, height, created_at_unix),
+        )
+        conn.commit()
+        return cursor.rowcount == 1
+    finally:
+        conn.close()
+
+
+def db_count_agnes_usage(project_id: str) -> int:
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        row = conn.execute(
+            "SELECT COUNT(*) FROM agnes_usage WHERE project_id = ?",
+            (project_id,),
+        ).fetchone()
+        return int(row[0] if row else 0)
     finally:
         conn.close()
 

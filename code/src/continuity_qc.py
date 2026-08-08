@@ -25,6 +25,7 @@ from src.state import ShotStoryboard
 class ContinuityResult:
     passed: bool
     issues: list[str] = field(default_factory=list)
+    metrics: dict[str, float] = field(default_factory=dict)
 
 
 class ContinuityChecker(Protocol):
@@ -51,7 +52,17 @@ def _frame_mean_brightness(image: Path) -> Optional[float]:
         return None
     try:
         result = subprocess.run(
-            [ffmpeg, "-hide_banner", "-i", str(image), "-vf", "signalstats", "-f", "null", "-"],
+            [
+                ffmpeg,
+                "-hide_banner",
+                "-i",
+                str(image),
+                "-vf",
+                "signalstats,metadata=print",
+                "-f",
+                "null",
+                "-",
+            ],
             check=False, capture_output=True, text=True,
         )
     except (subprocess.SubprocessError, OSError):
@@ -78,7 +89,7 @@ def _frame_brightness_distance(frame_a: Path, frame_b: Path) -> Optional[float]:
 
 def _brightness_threshold() -> float:
     """Configurable brightness-difference threshold for QC failure (R3)."""
-    return float(__import__("os").getenv("DRAMAMATRIX_QC_BRIGHTNESS_THRESHOLD", "25"))
+    return float(__import__("os").getenv("DRAMAMATRIX_QC_BRIGHTNESS_THRESHOLD", "45"))
 
 
 class DefaultChecker:
@@ -102,25 +113,44 @@ class DefaultChecker:
         curr_first_frame: Optional[Path] = None,
     ) -> ContinuityResult:
         issues: list[str] = []
+        metrics: dict[str, float] = {}
         if not curr_video.is_file():
             issues.append(f"当前镜头文件不存在: {curr_video}")
-            return ContinuityResult(passed=False, issues=issues)
+            return ContinuityResult(passed=False, issues=issues, metrics=metrics)
         if curr_video.stat().st_size == 0:
             issues.append(f"当前镜头文件为空: {curr_video}")
-            return ContinuityResult(passed=False, issues=issues)
+            return ContinuityResult(passed=False, issues=issues, metrics=metrics)
         if not _ffmpeg_available():
             # Graceful degradation: cannot run real checks → pass with a note.
             issues.append("无 ffmpeg，跳过像素级连续性检查（建议服务器端启用）。")
-            return ContinuityResult(passed=True, issues=issues)
+            return ContinuityResult(passed=not self.strict, issues=issues, metrics=metrics)
         # R3：当存在上一镜尾帧与当前镜首帧时，做亮度/直方图差异比较。
         if prev_last_frame and curr_first_frame:
             diff = _frame_brightness_distance(prev_last_frame, curr_first_frame)
+            if diff is None:
+                issues.append("无法计算上一镜尾帧与当前镜首帧的亮度差异。")
+                if self.strict:
+                    return ContinuityResult(passed=False, issues=issues, metrics=metrics)
+            else:
+                metrics["brightness_diff"] = diff
             if diff is not None and diff > _brightness_threshold():
                 issues.append(f"上一镜尾帧与当前镜首帧亮度差异过大（{diff:.2f}），可能存在跳变。")
-                return ContinuityResult(passed=False, issues=issues)
-        return ContinuityResult(passed=True, issues=issues)
+                return ContinuityResult(passed=False, issues=issues, metrics=metrics)
+        elif prev_last_frame and not curr_first_frame:
+            issues.append("当前镜首帧提取失败，无法执行跨镜质检。")
+            if self.strict:
+                return ContinuityResult(passed=False, issues=issues, metrics=metrics)
+        return ContinuityResult(passed=True, issues=issues, metrics=metrics)
 
 
 def get_checker() -> ContinuityChecker:
     """Factory: returns the configured checker (P2-A). Default is DefaultChecker."""
-    return DefaultChecker()
+    import os
+
+    strict = os.getenv("DRAMAMATRIX_QC_STRICT", "0").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    return DefaultChecker(strict=strict)

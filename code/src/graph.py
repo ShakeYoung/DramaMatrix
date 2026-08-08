@@ -38,7 +38,13 @@ def _render_failed_retryable(ep) -> bool:
     max_revisions = int(os.getenv("AGNES_MAX_REVISIONS", "2"))
     if not ep.storyboard_data:
         return False
-    if len(ep.feedback_log) >= max_revisions:
+    storyboard_revision_count = sum(
+        1
+        for feedback in ep.feedback_log
+        if feedback.reason_code == "AGNES_RENDER_FAILED"
+        and feedback.to_agent == "Agent_4_Storyboard"
+    )
+    if storyboard_revision_count >= max_revisions:
         return False
     return True
 
@@ -83,6 +89,7 @@ def route_from_start(state: DramaState) -> str:
                 "storyboard_done",
                 "rendering",
                 "render_pending",
+                "render_partial",
                 "waiting_for_agnes_capacity",
                 "waiting_for_connectivity",
             }
@@ -119,6 +126,10 @@ def route_next_step_for_episode(state: DramaState) -> str:
     # A submitted task is intentionally paused after a recoverable network error.
     # The next process start resumes polling it before any new render is submitted.
     if any(ep.status == "render_pending" for ep in episodes):
+        return END
+    # 受控测试只生成了分镜子集；下次解除/提高镜头上限后可从 Agent5 续跑，
+    # 但本次绝不能把部分素材交给 Agent6 当作完整成片。
+    if any(ep.status == "render_partial" for ep in episodes):
         return END
     if any(ep.status == "submission_uncertain" for ep in episodes):
         return END

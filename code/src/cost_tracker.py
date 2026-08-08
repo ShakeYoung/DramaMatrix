@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import csv
 import os
+import time
 from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Optional
@@ -44,31 +45,55 @@ class CostTracker:
     records: list = field(default_factory=list)
     report_path: Optional[Path] = None
     prior_count: int = 0  # usage persisted by previous runs
+    project_id: str = ""
 
     def __post_init__(self) -> None:
         # Durable budget (F8): when constructed with a report_path, auto-seed
         # prior_count from the persisted file so the limit holds across restarts,
         # regardless of construction path (direct or from_environment()).
-        if self.report_path:
+        if self.project_id:
+            try:
+                from src.db import db_count_agnes_usage
+
+                database_count = db_count_agnes_usage(self.project_id)
+                csv_count = (
+                    self._count_existing_rows(self.report_path, project_id=self.project_id)
+                    if self.report_path
+                    else 0
+                )
+                # Upgrade compatibility: old runs only wrote CSV. Taking the
+                # larger count preserves their budget without double-counting
+                # once both stores contain the same records.
+                self.prior_count = max(database_count, csv_count)
+            except Exception:
+                if self.report_path:
+                    self.prior_count = self._count_existing_rows(
+                        self.report_path, project_id=self.project_id
+                    )
+        elif self.report_path:
             self.prior_count = self._count_existing_rows(self.report_path)
 
     @classmethod
-    def from_environment(cls) -> "CostTracker":
+    def from_environment(cls, project_id: str = "") -> "CostTracker":
         report_path = output_root() / "agnes_usage_report.csv"
         return cls(
             max_creates=int(os.getenv("DRAMAMATRIX_MAX_AGNES_CREATES", "0") or 0),
             report_path=report_path,
-            prior_count=cls._count_existing_rows(report_path),
+            project_id=project_id,
         )
 
     @staticmethod
-    def _count_existing_rows(report_path: Path) -> int:
+    def _count_existing_rows(report_path: Path, project_id: str = "") -> int:
         if not report_path.is_file():
             return 0
         try:
             with report_path.open(encoding="utf-8") as handle:
                 reader = csv.DictReader(handle)
-                return sum(1 for _ in reader)
+                return sum(
+                    1
+                    for row in reader
+                    if not project_id or row.get("project_id") == project_id
+                )
         except (OSError, csv.Error):
             return 0
 
@@ -78,7 +103,21 @@ class CostTracker:
         return len(self.records) + self.prior_count
 
     def record_create(self, **kwargs) -> None:
-        self.records.append(AgnesUsageRecord(**kwargs))
+        kwargs.setdefault("created_at_unix", time.time())
+        record = AgnesUsageRecord(**kwargs)
+        if any(existing.task_id == record.task_id for existing in self.records):
+            return
+        if self.project_id:
+            try:
+                from src.db import db_record_agnes_usage
+
+                if not db_record_agnes_usage(**asdict(record)):
+                    # The task was already durably accounted for by a prior run.
+                    return
+            except Exception as exc:
+                # 资产快照仍由 Agent5 保存；CSV 会在节点结束时作为第二份审计记录。
+                print(f"⚠️ Agnes 用量写入 SQLite 失败，将保留 CSV 报表：{exc}")
+        self.records.append(record)
 
     def budget_exhausted(self) -> bool:
         return self.max_creates > 0 and self.create_count >= self.max_creates

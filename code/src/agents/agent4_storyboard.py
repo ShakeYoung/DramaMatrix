@@ -14,11 +14,21 @@ from src.continuity import normalize_continuity
 
 # P0-4 门禁：单集分镜数量下限/上限，以及生产模式是否允许 mock 兜底。
 def _min_shots() -> int:
+    target = int(os.getenv("DRAMAMATRIX_TARGET_SHOTS_PER_EPISODE", "0") or 0)
+    if _test_mode() and target > 0:
+        return max(1, target - 1)
     return int(os.getenv("DRAMAMATRIX_MIN_SHOTS_PER_EPISODE", "12"))
 
 
 def _max_shots() -> int:
+    target = int(os.getenv("DRAMAMATRIX_TARGET_SHOTS_PER_EPISODE", "0") or 0)
+    if _test_mode() and target > 0:
+        return target + 1
     return int(os.getenv("DRAMAMATRIX_MAX_SHOTS_PER_EPISODE", "30"))
+
+
+def _test_mode() -> bool:
+    return os.getenv("DRAMAMATRIX_TEST_MODE", "0").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _allow_mock_fallback() -> bool:
@@ -92,6 +102,12 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
         # 检查是否处于被退回重写的状态
         is_recovery = ep_state.status == "director_rejected"
         sys_prompt = STORYBOARD_SYSTEM_PROMPT
+        target_shots = int(os.getenv("DRAMAMATRIX_TARGET_SHOTS_PER_EPISODE", "0") or 0)
+        if _test_mode() and target_shots > 0:
+            sys_prompt += (
+                f"\n\n【受控测试模式】本集只输出约 {target_shots} 个分镜，"
+                "用于真实接口小规模联调；仍需覆盖开场、推进和结尾钩子。"
+            )
         if is_recovery and ep_state.feedback_log:
             last_error = ep_state.feedback_log[-1].message
             sys_prompt += "\n\n" + STORYBOARD_RECOVERY_PROMPT.format(

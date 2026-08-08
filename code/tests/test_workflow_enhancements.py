@@ -127,12 +127,41 @@ class RouteTests(unittest.TestCase):
             status="render_failed",
             storyboard_data=[make_episode().storyboard_data[0]],
             feedback_log=[
-                FeedbackLog(from_agent="a", to_agent="b", reason_code="R", message="m"),
-                FeedbackLog(from_agent="a", to_agent="b", reason_code="R", message="m"),
+                FeedbackLog(
+                    from_agent="Agent_5_Agnes_Director",
+                    to_agent="Agent_4_Storyboard",
+                    reason_code="AGNES_RENDER_FAILED",
+                    message="m",
+                ),
+                FeedbackLog(
+                    from_agent="Agent_5_Agnes_Director",
+                    to_agent="Agent_4_Storyboard",
+                    reason_code="AGNES_RENDER_FAILED",
+                    message="m",
+                ),
             ],
         )
         with patch.dict(os.environ, {"AGNES_MAX_REVISIONS": "2"}, clear=False):
             self.assertFalse(_render_failed_retryable(ep))
+
+    def test_qc_feedback_does_not_consume_storyboard_revision_budget(self):
+        from src.graph import _render_failed_retryable
+
+        ep = EpisodeState(
+            status="render_failed",
+            storyboard_data=[make_episode().storyboard_data[0]],
+            feedback_log=[
+                FeedbackLog(
+                    from_agent="Continuity_QC",
+                    to_agent="Agent_5_Agnes_Director",
+                    reason_code="QC_REDRAW",
+                    message="brightness jump",
+                )
+                for _ in range(5)
+            ],
+        )
+        with patch.dict(os.environ, {"AGNES_MAX_REVISIONS": "2"}, clear=False):
+            self.assertTrue(_render_failed_retryable(ep))
 
 
 class Agent1ScoutTests(unittest.TestCase):
@@ -401,6 +430,43 @@ class DurableBudgetTests(unittest.TestCase):
             lines = report.read_text(encoding="utf-8").strip().splitlines()
             # header + 2 data rows (append preserved the first row)
             self.assertEqual(len(lines), 3)
+
+    def test_sqlite_usage_is_project_scoped_and_task_idempotent(self):
+        import src.db as database
+        from src.cost_tracker import CostTracker
+
+        with tempfile.TemporaryDirectory() as directory:
+            base = Path(directory)
+            database_path = base / "usage.db"
+            report = base / "usage.csv"
+            with patch.object(database, "DB_PATH", str(database_path)):
+                database.init_db()
+                tracker = CostTracker(
+                    max_creates=10,
+                    report_path=report,
+                    project_id="project-a",
+                )
+                usage = dict(
+                    project_id="project-a",
+                    ep_key="ep_01",
+                    shot_id="s1",
+                    task_id="task-1",
+                    frames=49,
+                    width=720,
+                    height=1280,
+                )
+                tracker.record_create(**usage)
+                tracker.record_create(**usage)
+                self.assertEqual(tracker.create_count, 1)
+                self.assertEqual(database.db_count_agnes_usage("project-a"), 1)
+                self.assertEqual(database.db_count_agnes_usage("project-b"), 0)
+
+                resumed = CostTracker(
+                    max_creates=10,
+                    report_path=report,
+                    project_id="project-a",
+                )
+                self.assertEqual(resumed.create_count, 1)
 
 
 if __name__ == "__main__":

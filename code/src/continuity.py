@@ -50,20 +50,90 @@ def normalize_continuity(
     if not shots:
         return warnings
 
-    # Backfill start_state from flat fields when absent.
+    # 先记录缺失场景；场景编号必须在构造边界状态前补齐。
     for shot in shots:
+        if not shot.scene_id:
+            warnings.append(
+                ContinuityWarning(
+                    shot.shot_id,
+                    "scene_id",
+                    "缺失 scene_id，将依据相邻镜环境自动补齐",
+                )
+            )
+
+    # 补齐 scene_id：仅在地点/时段/天气没有变化时沿用上一场景；环境发生
+    # 明确变化则开启新的自动场景，避免把办公室与街道错误地串成同一场。
+    last_scene: Optional[str] = None
+    auto_scene_index = 0
+    previous_environment: dict[str, str] = {}
+    for shot in shots:
+        current_environment = {
+            field_name: value
+            for field_name in ("location_id", "time_of_day", "weather")
+            if (value := getattr(shot, field_name, None))
+        }
+        if shot.scene_id:
+            scene_changed = bool(last_scene and shot.scene_id != last_scene)
+            last_scene = shot.scene_id
+            if scene_changed:
+                previous_environment = current_environment
+            else:
+                previous_environment.update(current_environment)
+        else:
+            environment_changed = any(
+                previous_environment.get(field_name)
+                and previous_environment[field_name] != value
+                for field_name, value in current_environment.items()
+            )
+            if not last_scene or environment_changed:
+                auto_scene_index += 1
+                shot.scene_id = f"scene_auto_{auto_scene_index:02d}"
+            else:
+                shot.scene_id = last_scene
+            last_scene = shot.scene_id
+            if environment_changed:
+                previous_environment = current_environment
+            else:
+                previous_environment.update(current_environment)
+
+    # 同一 scene_id 采用首镜的环境状态作为场景圣经。此前只改 end_state，
+    # visual_prompt 仍携带相互冲突的光线/色温；这里同步修正平铺字段和 start_state。
+    scene_environment: dict[str, dict[str, Optional[str]]] = {}
+    environment_fields = (
+        "location_id",
+        "time_of_day",
+        "weather",
+        "light_direction",
+        "color_temperature",
+    )
+    for shot in shots:
+        scene_id = shot.scene_id or "scene_auto_01"
+        canonical = scene_environment.setdefault(scene_id, {})
+        for field_name in environment_fields:
+            value = getattr(shot, field_name, None)
+            expected = canonical.get(field_name)
+            if not expected and value:
+                canonical[field_name] = value
+                expected = value
+            elif expected and value and value != expected:
+                warnings.append(
+                    ContinuityWarning(
+                        shot.shot_id,
+                        field_name,
+                        f"同场景 {scene_id} 的 {field_name}={value} 与场景圣经 {expected} 不一致，已改为 {expected}",
+                    )
+                )
+                setattr(shot, field_name, expected)
+            elif expected and not value:
+                setattr(shot, field_name, expected)
+
         if shot.start_state is None:
             shot.start_state = _boundary_from_shot(shot)
-        if not shot.scene_id:
-            warnings.append(ContinuityWarning(shot.shot_id, "scene_id", "缺失 scene_id，将沿用上一镜场景"))
-
-    # Propagate scene_id forward when missing.
-    last_scene: Optional[str] = None
-    for shot in shots:
-        if shot.scene_id:
-            last_scene = shot.scene_id
-        elif last_scene:
-            shot.scene_id = last_scene
+        else:
+            if shot.light_direction:
+                shot.start_state.light_direction = shot.light_direction
+            if shot.color_temperature:
+                shot.start_state.color_temperature = shot.color_temperature
 
     # Normalize end_state of each shot to the next shot's start_state.
     for i in range(len(shots) - 1):
@@ -73,19 +143,6 @@ def normalize_continuity(
         nxt.start_state = nxt_start
         current.end_state = nxt_start.model_copy()
         current.previous_shot_id = shots[i - 1].shot_id if i > 0 else None
-        # If two adjacent shots share a scene but disagree on key env fields, warn.
-        if current.scene_id and nxt.scene_id and current.scene_id == nxt.scene_id:
-            for field_name in ("light_direction", "color_temperature", "time_of_day"):
-                a = getattr(current, field_name, None)
-                b = getattr(nxt, field_name, None)
-                if a and b and a != b:
-                    warnings.append(
-                        ContinuityWarning(
-                            current.shot_id,
-                            field_name,
-                            f"同场景 {current.scene_id} 相邻镜 {field_name} 不一致：{a} vs {b}（已按下一镜归一化）",
-                        )
-                    )
 
     # Last shot: end_state falls back to its own start_state.
     last = shots[-1]
@@ -102,12 +159,11 @@ def normalize_continuity(
 def write_continuity_into_prompt(shot: ShotStoryboard) -> None:
     """Append continuity facts (scene/light/wardrobe/pose) to visual_prompt (P1-1).
 
-    Idempotent: skips appending if a continuity marker is already present, so
-    repeated normalization passes don't bloat the prompt.
+    Idempotent: replace an existing continuity suffix so migrated/resumed shots
+    receive the latest normalized facts without prompt bloat.
     """
     marker = "[continuity]"
-    if marker in (shot.visual_prompt or ""):
-        return
+    base_prompt = (shot.visual_prompt or "").split(marker, 1)[0].rstrip()
     facts: list[str] = []
     if shot.scene_id:
         facts.append(f"scene={shot.scene_id}")
@@ -125,7 +181,7 @@ def write_continuity_into_prompt(shot: ShotStoryboard) -> None:
         facts.append(f"start_pose={shot.start_state.pose}")
     if not facts:
         return
-    shot.visual_prompt = (shot.visual_prompt or "").rstrip() + f" {marker} " + "; ".join(facts)
+    shot.visual_prompt = base_prompt + f" {marker} " + "; ".join(facts)
 
 
 def conditional_generation_enabled() -> bool:

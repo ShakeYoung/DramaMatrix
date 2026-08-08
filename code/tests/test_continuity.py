@@ -7,6 +7,8 @@ Covers: storyboard version isolation (P0-A), character bible + render gate
 """
 
 import os
+import shutil
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -125,6 +127,34 @@ class ContinuityNormalizationTests(unittest.TestCase):
         self.assertEqual(s2.scene_id, "A")
         self.assertTrue(any(w.field == "scene_id" for w in warnings))
 
+    def test_missing_scene_id_starts_new_scene_when_location_changes(self):
+        from src.continuity import normalize_continuity
+
+        s1 = make_shot("s1", location_id="office")
+        s2 = make_shot("s2")
+        s3 = make_shot("s3", location_id="street")
+        normalize_continuity([s1, s2, s3])
+        self.assertEqual(s1.scene_id, "scene_auto_01")
+        self.assertEqual(s2.scene_id, "scene_auto_01")
+        self.assertEqual(s3.scene_id, "scene_auto_02")
+
+    def test_same_scene_environment_is_canonicalized_and_prompt_refreshed(self):
+        from src.continuity import normalize_continuity
+
+        s1 = make_shot(
+            "s1", scene_id="A", light_direction="left", color_temperature="3200K"
+        )
+        s2 = make_shot(
+            "s2", scene_id="A", light_direction="right", color_temperature="6500K"
+        )
+        s2.visual_prompt += " [continuity] light=right; color_temp=6500K"
+        warnings = normalize_continuity([s1, s2])
+        self.assertEqual(s2.light_direction, "left")
+        self.assertEqual(s2.color_temperature, "3200K")
+        self.assertIn("light=left", s2.visual_prompt)
+        self.assertNotIn("light=right", s2.visual_prompt)
+        self.assertTrue(any(w.field == "light_direction" for w in warnings))
+
 
 class ConditionalCreateVideoTests(unittest.TestCase):
     """P1-B: create_video includes image fields only when provided."""
@@ -207,6 +237,32 @@ class QCHookTests(unittest.TestCase):
         from src.continuity_qc import DefaultChecker
         result = DefaultChecker().check(None, None, Path("/nope/x.mp4"), make_shot("s1"))
         self.assertFalse(result.passed)
+
+    @unittest.skipUnless(shutil.which("ffmpeg"), "ffmpeg is required")
+    def test_frame_brightness_is_measured(self):
+        from src.continuity_qc import _frame_mean_brightness
+
+        with tempfile.TemporaryDirectory() as directory:
+            frame = Path(directory) / "white.png"
+            subprocess.run(
+                [
+                    shutil.which("ffmpeg"),
+                    "-hide_banner",
+                    "-loglevel",
+                    "error",
+                    "-f",
+                    "lavfi",
+                    "-i",
+                    "color=white:s=32x32",
+                    "-frames:v",
+                    "1",
+                    str(frame),
+                ],
+                check=True,
+            )
+            value = _frame_mean_brightness(frame)
+        self.assertIsNotNone(value)
+        self.assertGreater(value, 200)
 
 
 class EditTrimTests(unittest.TestCase):

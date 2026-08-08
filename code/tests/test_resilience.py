@@ -121,6 +121,36 @@ class WaitingStateRoutingTests(unittest.TestCase):
             }}
             self.assertEqual(route_next_step_for_episode(state), "__end__")
 
+    def test_test_mode_allows_small_real_storyboard(self):
+        from src.agents.agent4_storyboard import StoryboardOutput, process_agent4_storyboard
+
+        ep = EpisodeState(
+            status="script_done",
+            script_data=EpisodeScriptData(ep_id="ep_01", outline="o", ending_hook="h"),
+        )
+        state = {
+            "project_id": "p",
+            "episodes": {"ep_01": ep},
+            "characters": [],
+            "system_status": "x",
+        }
+        output = StoryboardOutput(shots=[make_shot("s1"), make_shot("s2")])
+        with patch.dict(
+            os.environ,
+            {
+                "DRAMAMATRIX_TEST_MODE": "1",
+                "DRAMAMATRIX_TARGET_SHOTS_PER_EPISODE": "2",
+                "DRAMAMATRIX_MAX_TOTAL_SHOTS": "10",
+            },
+            clear=False,
+        ), patch("src.agents.agent4_storyboard.create_text_model"), patch(
+            "src.agents.agent4_storyboard._invoke_storyboard_with_retry",
+            return_value=output,
+        ):
+            process_agent4_storyboard(state)
+        self.assertEqual(ep.status, "storyboard_done")
+        self.assertEqual(len(ep.storyboard_data), 2)
+
 
 class Agent4GateTests(unittest.TestCase):
     """P0-4: LLM failure blocks (no mock fallback in production); shot-count gate."""
