@@ -123,13 +123,17 @@ def init_db():
         shot_id TEXT,
         scored_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         scorer TEXT,
+        rubric_version TEXT DEFAULT 'v1',
+        round INTEGER DEFAULT 1,
+        video_sha256 TEXT,
         character_consistency REAL,
         wardrobe_consistency REAL,
         action_continuity REAL,
         subtitle_alignment REAL,
         voice_alignment REAL,
         overall REAL,
-        notes TEXT
+        notes TEXT,
+        UNIQUE(project_id, ep_key, shot_id, scorer, round)
     )
     ''')
     # V5：参考资产引用链（哪一镜引用了哪张角色/场景/尾帧参考图）
@@ -282,19 +286,43 @@ def db_get_state_history(project_id, limit=50):
 def db_insert_manual_score(project_id, ep_key=None, shot_id=None, scorer=None,
                            character_consistency=None, wardrobe_consistency=None,
                            action_continuity=None, subtitle_alignment=None,
-                           voice_alignment=None, overall=None, notes=None):
-    """V5：插入一条人工评分。"""
+                           voice_alignment=None, overall=None, notes=None,
+                           rubric_version="v1", round_number=1, video_sha256=None):
+    """V5/F5：插入一条人工评分（UPSERT 去重：同 project/ep/shot/scorer/round 覆盖）。
+
+    评分范围约束：0–5（可为小数），越界抛 ValueError 拒绝写入。
+    """
+    for label, value in [("character_consistency", character_consistency),
+                         ("wardrobe_consistency", wardrobe_consistency),
+                         ("action_continuity", action_continuity),
+                         ("subtitle_alignment", subtitle_alignment),
+                         ("voice_alignment", voice_alignment),
+                         ("overall", overall)]:
+        if value is not None and not (0 <= float(value) <= 5):
+            raise ValueError(f"{label} 评分 {value} 超出 0–5 范围")
     conn = sqlite3.connect(DB_PATH)
     try:
         conn.execute(
             """INSERT INTO manual_scores
-            (project_id, ep_key, shot_id, scorer, character_consistency,
-             wardrobe_consistency, action_continuity, subtitle_alignment,
-             voice_alignment, overall, notes)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (project_id, ep_key, shot_id, scorer, character_consistency,
-             wardrobe_consistency, action_continuity, subtitle_alignment,
-             voice_alignment, overall, notes),
+            (project_id, ep_key, shot_id, scorer, rubric_version, round, video_sha256,
+             character_consistency, wardrobe_consistency, action_continuity,
+             subtitle_alignment, voice_alignment, overall, notes)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(project_id, ep_key, shot_id, scorer, round) DO UPDATE SET
+                rubric_version = excluded.rubric_version,
+                video_sha256 = excluded.video_sha256,
+                character_consistency = excluded.character_consistency,
+                wardrobe_consistency = excluded.wardrobe_consistency,
+                action_continuity = excluded.action_continuity,
+                subtitle_alignment = excluded.subtitle_alignment,
+                voice_alignment = excluded.voice_alignment,
+                overall = excluded.overall,
+                notes = excluded.notes,
+                scored_at = CURRENT_TIMESTAMP
+            """,
+            (project_id, ep_key, shot_id, scorer, rubric_version, round_number, video_sha256,
+             character_consistency, wardrobe_consistency, action_continuity,
+             subtitle_alignment, voice_alignment, overall, notes),
         )
         conn.commit()
     finally:
@@ -313,6 +341,7 @@ def db_export_manual_scores(project_id, csv_path):
     finally:
         conn.close()
     fieldnames = ["id", "project_id", "ep_key", "shot_id", "scored_at", "scorer",
+                  "rubric_version", "round", "video_sha256",
                   "character_consistency", "wardrobe_consistency", "action_continuity",
                   "subtitle_alignment", "voice_alignment", "overall", "notes"]
     with open(csv_path, "w", newline="", encoding="utf-8") as handle:
@@ -324,7 +353,10 @@ def db_export_manual_scores(project_id, csv_path):
 
 
 def db_import_manual_scores(csv_path):
-    """V5：从 CSV 导入人工评分（列须含 project_id；其余评分列可选）。"""
+    """V5/F5：从 CSV 导入人工评分（列须含 project_id；其余评分列可选）。
+
+    UPSERT 去重（同 project/ep/shot/scorer/round 覆盖），评分越界抛 ValueError。
+    """
     import csv as _csv
     inserted = 0
     with open(csv_path, "r", newline="", encoding="utf-8") as handle:
@@ -342,6 +374,9 @@ def db_import_manual_scores(csv_path):
                 voice_alignment=_to_float(row.get("voice_alignment")),
                 overall=_to_float(row.get("overall")),
                 notes=row.get("notes"),
+                rubric_version=row.get("rubric_version") or "v1",
+                round_number=int(row["round"]) if (row.get("round") or "").isdigit() else 1,
+                video_sha256=row.get("video_sha256"),
             )
             inserted += 1
     return inserted
@@ -380,20 +415,53 @@ def db_record_agnes_usage(
     width: int,
     height: int,
     created_at_unix: float | None = None,
+    queue_wait_seconds: float | None = None,
+    render_seconds: float | None = None,
+    download_seconds: float | None = None,
+    redraw_count: int = 0,
 ) -> bool:
-    """Persist one billed create idempotently. Returns True only for a new task."""
+    """Persist one billed create idempotently. Returns True only for a new task.
+
+    F3：扩展字段在创建/轮询/下载各阶段采集后由 db_update_agnes_usage_timing 更新。
+    """
     conn = sqlite3.connect(DB_PATH)
     try:
         cursor = conn.execute(
             """
             INSERT OR IGNORE INTO agnes_usage
-                (task_id, project_id, ep_key, shot_id, frames, width, height, created_at_unix)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                (task_id, project_id, ep_key, shot_id, frames, width, height, created_at_unix,
+                 queue_wait_seconds, render_seconds, download_seconds, redraw_count)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
-            (task_id, project_id, ep_key, shot_id, frames, width, height, created_at_unix),
+            (task_id, project_id, ep_key, shot_id, frames, width, height, created_at_unix,
+             queue_wait_seconds, render_seconds, download_seconds, redraw_count),
         )
         conn.commit()
         return cursor.rowcount == 1
+    finally:
+        conn.close()
+
+
+def db_update_agnes_usage_timing(task_id: str, *, render_seconds=None, download_seconds=None, redraw_count=None):
+    """F3：按 task_id 更新耗时/重绘字段（轮询与下载完成后调用）。"""
+    conn = sqlite3.connect(DB_PATH)
+    try:
+        sets = []
+        params = []
+        if render_seconds is not None:
+            sets.append("render_seconds = ?")
+            params.append(render_seconds)
+        if download_seconds is not None:
+            sets.append("download_seconds = ?")
+            params.append(download_seconds)
+        if redraw_count is not None:
+            sets.append("redraw_count = ?")
+            params.append(redraw_count)
+        if not sets:
+            return
+        params.append(task_id)
+        conn.execute(f"UPDATE agnes_usage SET {', '.join(sets)} WHERE task_id = ?", params)
+        conn.commit()
     finally:
         conn.close()
 

@@ -5,6 +5,7 @@ then attach a voiceover track (TTS) produced from the shots' dialogue.
 from pathlib import Path
 
 from src.agnes_video import AgnesVideoError, concat_videos, episode_output_dir, has_audio_stream
+from src.deliverables import record_deliverable
 from src.state import DramaState, EpisodeState, FeedbackLog
 from src.subtitles import build_ass_track, burn_subtitles
 from src.tts import build_voiceover, mix_audio_into_video
@@ -20,9 +21,12 @@ def process_agent6_editor(state: DramaState) -> DramaState:
     for ep_key, ep_state in targets:
         try:
             inputs = [Path(asset.local_path) for asset in ep_state.video_assets if asset.local_path]
+            source_shots = [asset.shot_id for asset in ep_state.video_assets if asset.local_path]
             ep_dir = episode_output_dir(state["project_id"], ep_key)
             output = ep_dir / f"{ep_key}_master.mp4"
             final_video = concat_videos(inputs, output)
+            # F4：master 证据
+            record_deliverable(ep_state, kind="master", path=final_video, source_shots=source_shots)
 
             # H4：若成片已含音频（Agnes 原生语音成功），保留原音轨，跳过独立 TTS；
             # 仅在无声时才用独立 TTS 兜底。
@@ -35,12 +39,16 @@ def process_agent6_editor(state: DramaState) -> DramaState:
                 muxed = mix_audio_into_video(final_video, Path(voiceover), ep_dir / f"{ep_key}_voiced.mp4")
                 ep_state.audio_track = str(voiceover)
                 final_video = muxed
+                # F4：配音版证据
+                record_deliverable(ep_state, kind="voiced", path=muxed, source_shots=source_shots)
 
             # T6: burn in "大字报" subtitles for the shot dialogue windows.
             subtitled = _apply_subtitles(ep_state, final_video, ep_dir)
             if subtitled is not None:
                 ep_state.subtitle_track = str(subtitled[1])
                 final_video = subtitled[0]
+                # F4：字幕版证据
+                record_deliverable(ep_state, kind="subtitled", path=final_video, source_shots=source_shots)
 
             ep_state.final_video_path = str(final_video)
             ep_state.status = "edit_completed"
@@ -61,6 +69,8 @@ def process_agent6_editor(state: DramaState) -> DramaState:
 
     state["system_status"] = "episodes_edited" if all(ep.status == "edit_completed" for _, ep in targets) else "blocked_on_editing"
     return state
+
+
 
 
 def _aligned_durations(ep_state: EpisodeState) -> list[float]:

@@ -234,5 +234,145 @@ class AgnesUsageExtendedTests(unittest.TestCase):
             self.assertIn(col, cols)
 
 
+class QCFailurePersistenceTests(unittest.TestCase):
+    """F1: failed QC results persist too."""
+
+    def test_failed_qc_inserted_with_issues(self):
+        import src.db
+        with tempfile.TemporaryDirectory() as d:
+            src.db.DB_PATH = os.path.join(d, "test.db")
+            src.db.init_db()
+            src.db.db_insert_qc_result(
+                project_id="p1", ep_key="ep_01", shot_id="s1", passed=False,
+                brightness_diff=88.0, threshold=25.0, issues=["亮度差异过大"],
+                metrics={"brightness_diff": 88.0, "threshold": 25.0},
+            )
+            results = src.db.db_query_qc_results("p1")
+        self.assertEqual(len(results), 1)
+        self.assertEqual(results[0]["passed"], 0)  # failed persisted
+        self.assertEqual(results[0]["brightness_diff"], 88.0)
+
+
+class ReferenceHashTests(unittest.TestCase):
+    """F2: reference_assets stores local path + sha256."""
+
+    def test_reference_asset_with_hash(self):
+        import src.db
+        with tempfile.TemporaryDirectory() as d:
+            src.db.DB_PATH = os.path.join(d, "test.db")
+            src.db.init_db()
+            src.db.db_insert_reference_asset(
+                project_id="p1", asset_type="tail_frame", ref_id="tail",
+                local_path="/tmp/tail.png", sha256="abc123",
+                referenced_by_shot="s2",
+            )
+            conn = __import__("sqlite3").connect(src.db.DB_PATH)
+            conn.row_factory = __import__("sqlite3").Row
+            row = conn.execute("SELECT * FROM reference_assets WHERE referenced_by_shot='s2'").fetchone()
+            conn.close()
+        self.assertEqual(row["sha256"], "abc123")
+        self.assertEqual(row["local_path"], "/tmp/tail.png")
+
+
+class AgnesUsageTimingTests(unittest.TestCase):
+    """F3: agnes_usage extended fields are filled."""
+
+    def test_record_with_timing_and_update(self):
+        import src.db
+        with tempfile.TemporaryDirectory() as d:
+            src.db.DB_PATH = os.path.join(d, "test.db")
+            src.db.init_db()
+            src.db.db_record_agnes_usage(
+                task_id="t1", project_id="p1", ep_key="ep_01", shot_id="s1",
+                frames=97, width=720, height=1280, queue_wait_seconds=3.5,
+            )
+            src.db.db_update_agnes_usage_timing("t1", render_seconds=80.0, download_seconds=12.0, redraw_count=1)
+            conn = __import__("sqlite3").connect(src.db.DB_PATH)
+            conn.row_factory = __import__("sqlite3").Row
+            row = conn.execute("SELECT * FROM agnes_usage WHERE task_id='t1'").fetchone()
+            conn.close()
+        self.assertEqual(row["queue_wait_seconds"], 3.5)
+        self.assertEqual(row["render_seconds"], 80.0)
+        self.assertEqual(row["download_seconds"], 12.0)
+        self.assertEqual(row["redraw_count"], 1)
+
+
+class DeliverableEvidenceTests(unittest.TestCase):
+    """F4: deliverable evidence recorded on EpisodeState."""
+
+    def test_record_deliverable_replaces_same_kind(self):
+        from src.deliverables import record_deliverable
+        from src.agnes_video import sha256_file
+        ep = EpisodeState()
+        with tempfile.TemporaryDirectory() as d:
+            p1 = Path(d) / "master.mp4"
+            p1.write_bytes(b"master-video")
+            p2 = Path(d) / "master2.mp4"
+            p2.write_bytes(b"master-video-2")
+            record_deliverable(ep, "master", p1, ["s1", "s2"])
+            record_deliverable(ep, "master", p2, ["s1", "s2"])
+            record_deliverable(ep, "voiced", p2, ["s1"])
+            kinds = [a.kind for a in ep.deliverables]
+            self.assertEqual(kinds.count("master"), 1)  # replaced, not duplicated
+            self.assertIn("voiced", kinds)
+            master = next(a for a in ep.deliverables if a.kind == "master")
+            # master 证据对应最新文件（master2）
+            self.assertEqual(master.sha256, sha256_file(p2))
+
+
+class ManualScoreProtocolTests(unittest.TestCase):
+    """F5: score range enforced; import is idempotent (UPSERT dedup)."""
+
+    def test_out_of_range_score_rejected(self):
+        import src.db
+        with tempfile.TemporaryDirectory() as d:
+            src.db.DB_PATH = os.path.join(d, "test.db")
+            src.db.init_db()
+            with self.assertRaises(ValueError):
+                src.db.db_insert_manual_score(
+                    project_id="p1", ep_key="ep_01", shot_id="s1",
+                    scorer="a", overall=9.0,  # out of 0–5
+                )
+
+    def test_import_dedup_same_scorer_round(self):
+        import csv
+        import src.db
+        with tempfile.TemporaryDirectory() as d:
+            src.db.DB_PATH = os.path.join(d, "test.db")
+            src.db.init_db()
+            csv_path = os.path.join(d, "scores.csv")
+            with open(csv_path, "w", newline="", encoding="utf-8") as f:
+                w = csv.DictWriter(f, fieldnames=["project_id", "ep_key", "shot_id", "scorer", "round", "overall"])
+                w.writeheader()
+                w.writerow({"project_id": "p1", "ep_key": "ep_01", "shot_id": "s1", "scorer": "a", "round": "1", "overall": "4"})
+                w.writerow({"project_id": "p1", "ep_key": "ep_01", "shot_id": "s1", "scorer": "a", "round": "1", "overall": "3"})
+            src.db.db_import_manual_scores(csv_path)
+            conn = __import__("sqlite3").connect(src.db.DB_PATH)
+            conn.row_factory = __import__("sqlite3").Row
+            rows = conn.execute("SELECT * FROM manual_scores").fetchall()
+            conn.close()
+        self.assertEqual(len(rows), 1)  # second import overwrote first
+        self.assertEqual(rows[0]["overall"], 3.0)
+
+
+class RunContextUUIDTests(unittest.TestCase):
+    """F6: run_id is a UUID (no second-level collision); new params captured."""
+
+    def test_run_id_is_uuid(self):
+        from src.run_context import capture_run_context
+        ctx = capture_run_context()
+        self.assertEqual(len(ctx["run_id"]), 32)  # uuid4().hex
+        # two captures differ
+        ctx2 = capture_run_context()
+        self.assertNotEqual(ctx["run_id"], ctx2["run_id"])
+
+    def test_test_mode_param_captured(self):
+        from src.run_context import capture_run_context
+        with patch.dict(os.environ, {"DRAMAMATRIX_TEST_MODE": "1", "DRAMAMATRIX_MAX_EPISODES": "2"}, clear=False):
+            ctx = capture_run_context()
+        self.assertEqual(ctx["config"].get("DRAMAMATRIX_TEST_MODE"), "1")
+        self.assertEqual(ctx["config"].get("DRAMAMATRIX_MAX_EPISODES"), "2")
+
+
 if __name__ == "__main__":
     unittest.main()

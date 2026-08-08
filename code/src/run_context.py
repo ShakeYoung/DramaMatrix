@@ -13,6 +13,7 @@ import platform
 import subprocess
 import time
 from typing import Any
+from uuid import uuid4
 
 
 # Whitelist of non-sensitive env vars to snapshot (NO keys/tokens/secrets).
@@ -45,6 +46,17 @@ _CONFIG_ENV_WHITELIST = [
     "AGNES_QUEUE_RETRY_MAX_SECONDS",
     "AGNES_PREFLIGHT_CACHE_SECONDS",
     "AGNES_MAX_SHOTS_PER_EPISODE",
+    # F6：补全实验关键参数
+    "DRAMAMATRIX_TEST_MODE",
+    "DRAMAMATRIX_MAX_EPISODES",
+    "DRAMAMATRIX_TARGET_SHOTS_PER_EPISODE",
+    "DRAMAMATRIX_MAX_AGNES_CREATES",
+    "DRAMAMATRIX_OUTPUT_DIR",
+    "DRAMAMATRIX_PROJECT_ID",
+    "AGNES_IMAGE_FIELD",
+    "AGNES_IMAGE_URL_FIELD",
+    "AGNES_LAST_FRAME_FIELD",
+    "AGNES_NARRATION_FIELD",
 ]
 
 
@@ -103,7 +115,8 @@ def capture_run_context() -> dict[str, Any]:
         if value is not None and not _looks_sensitive(name):
             config[name] = value
     return {
-        "run_id": f"{int(time.time())}",
+        # F6：UUID 避免秒级时间戳碰撞（同一秒多项目/多运行会冲突）
+        "run_id": uuid4().hex,
         "captured_at": time.time(),
         "git_sha": _git_sha(),
         "python_version": platform.python_version(),

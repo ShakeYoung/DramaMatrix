@@ -19,6 +19,7 @@ from src.agnes_video import (
     episode_output_dir,
     video_duration,
 )
+from src.deliverables import record_deliverable
 from src.state import DramaState, EpisodeState, FeedbackLog, GrowthAsset, GrowthMeta
 
 
@@ -128,6 +129,9 @@ def process_agent7_growth(state: DramaState) -> DramaState:
                 out_path = growth_dir / f"{ep_key}_{name}.mp4"
                 path = cut_video(master, out_path, start, clip_duration)
                 headline, description, tags = _asset_meta(name, base_meta, total_seconds)
+                # F4：投流切片证据（来源镜头 = 全集成片镜头）
+                record_deliverable(ep_state, kind=f"clip_{name}", path=path,
+                                   source_shots=[s.shot_id for s in ep_state.storyboard_data])
                 assets.append(
                     GrowthAsset(
                         name=name,

@@ -123,6 +123,21 @@ class GrowthMeta(BaseModel):
     tags: List[str] = Field(default_factory=list, description="发布推荐标签")
     cover_prompt: str = Field(description="封面图生成提示词")
 
+
+class DeliverableAsset(BaseModel):
+    """F4：成片级交付资产（master/配音版/字幕版/投流切片）的完整性证据。
+
+    论文/专利实验需要成片级别的证据链：哈希、实际时长、音频参数、来源镜头清单。
+    """
+    kind: str = Field(description="资产类型：master/voiced/subtitled/clip_hook/clip_climax")
+    path: str = Field(description="文件路径")
+    sha256: Optional[str] = Field(default=None, description="文件 SHA-256")
+    file_size_bytes: Optional[int] = Field(default=None)
+    actual_duration: Optional[float] = Field(default=None, description="ffprobe 实测时长")
+    has_audio: Optional[bool] = Field(default=None)
+    source_shots: List[str] = Field(default_factory=list, description="来源镜头清单")
+    created_at: Optional[float] = Field(default=None)
+
 class EpisodeState(BaseModel):
     """单集的完整状态字典模式 (在图节点中流转的状态封装)"""
     status: Literal[
@@ -166,8 +181,8 @@ class EpisodeState(BaseModel):
     # 调试/受控渲染可能只生成分镜子集；记录实际完成进度，禁止误入 Agent6。
     rendered_shot_count: int = Field(default=0)
     planned_shot_count: int = Field(default=0)
-    # V1：实际渲染的镜头资产（含哈希/真实媒体参数/seed/参考图等完整性证据）
-    rendered_assets: List[GeneratedVideoAsset] = Field(default_factory=list)
+    # F4：成片级交付资产证据（master/配音版/字幕版/投流切片）
+    deliverables: List[DeliverableAsset] = Field(default_factory=list)
 
 
 class MarketFeedback(BaseModel):

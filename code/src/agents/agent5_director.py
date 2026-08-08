@@ -234,6 +234,7 @@ def _render_episode(
                         data_uri = frame_to_data_uri(frame_path)
                         previous_tail_reference = data_uri if data_uri else None
             continue
+        shot_create_started_at = time.time()  # F3：本镜创建起始（恢复/新建均记录）
         try:
             if asset and (asset.video_id or asset.task_id):
                 video_id = asset.video_id
@@ -252,6 +253,7 @@ def _render_episode(
                     print(f"⏸️ {ep_key}/{shot.shot_id} Agnes 容量降级中，等待恢复后重试。")
                     return
                 # P1-C：条件输入。同场景首镜用场景参考图；后续镜用上一镜尾帧。
+                asset_reference_sha = None  # F2：参考图哈希，无条件生成时为 None
                 create_kwargs = dict(
                     prompt=prompt,
                     negative_prompt=NEGATIVE_PROMPT,
@@ -264,21 +266,31 @@ def _render_episode(
                         create_kwargs["image_url"] = ref["image_url"]
                         ref_source = "上一镜尾帧" if previous_tail_reference else "场景参考"
                         print(f"   [{ep_key}/{shot.shot_id}] 携带参考图（{ref_source}）。")
-                        # V5：记录参考资产引用链（哪一镜引用了哪张参考图）。
+                        # F2：记录参考资产引用链——保存本地路径与 SHA-256 证据，
+                        # 而非只依赖临时 data: URI；并把哈希回填到资产证据字段。
                         try:
+                            from src.agnes_video import sha256_file
                             from src.db import db_insert_reference_asset
+                            ref_local = previous_tail_path if previous_tail_reference else None
+                            ref_sha = sha256_file(ref_local) if ref_local else None
                             db_insert_reference_asset(
                                 project_id=state["project_id"],
                                 asset_type="tail_frame" if previous_tail_reference else "scene",
                                 ref_id=shot.scene_id or "tail",
+                                local_path=str(ref_local) if ref_local else None,
+                                sha256=ref_sha,
                                 referenced_by_shot=shot.shot_id,
                             )
+                            asset_reference_sha = ref_sha
                         except Exception:
-                            pass
+                            asset_reference_sha = None
+                    else:
+                        asset_reference_sha = None
                 # G4a：Agnes 原生语音——把对白作为旁白传给 Agnes（字段名可配）。
                 # 是否被接受需服务器端验证；Agent6 会检测无声并回退独立 TTS。
                 if agnes_voice_enabled() and (shot.dialogue or "").strip():
                     create_kwargs["narration"] = (shot.dialogue or "").strip()
+                create_started_at = time.time()  # F3：提交起始时刻（排队耗时）
                 created = client.create_video(**create_kwargs)
                 # G1：成功创建说明容量已恢复，清除降级标记并释放槽位。
                 if in_flight > 1:
@@ -287,6 +299,9 @@ def _render_episode(
                 created_video_id = created.get("video_id")
                 video_id = str(created_video_id or created.get("task_id") or created["id"])
                 task_id = str(created.get("task_id") or created.get("id") or video_id)
+                # F3：采集提交→响应的排队耗时（queue_wait），并记录本镜创建起始时刻。
+                queue_wait_seconds = time.time() - create_started_at
+                shot_create_started_at = time.time()
                 tracker.record_create(
                     project_id=state["project_id"],
                     ep_key=ep_key,
@@ -295,6 +310,7 @@ def _render_episode(
                     frames=frames_for_duration(shot.duration, settings.frame_rate),
                     width=settings.width,
                     height=settings.height,
+                    queue_wait_seconds=queue_wait_seconds,
                 )
                 asset = GeneratedVideoAsset(
                     shot_id=shot.shot_id,
@@ -307,6 +323,8 @@ def _render_episode(
                     negative_prompt=NEGATIVE_PROMPT,
                     model_version=settings.model,
                     reference_image_url=create_kwargs.get("image_url"),
+                    # F2：参考图哈希回填（尾帧本地哈希；场景参考时可能为 None）
+                    reference_image_sha256=asset_reference_sha,
                     agnes_response_summary={k: str(v)[:200] for k, v in created.items() if k in ("video_id", "task_id", "id", "status", "model")},
                 )
                 ep_state.video_assets.append(asset)
@@ -319,16 +337,30 @@ def _render_episode(
                 print(f"   [{ep_key}/{shot.shot_id}] 已创建 Agnes 任务并保存: {task_id}")
 
             completed = client.wait_for_video(video_id, task_id)
+            # F3：渲染耗时 = 创建后到轮询完成。
+            render_seconds = time.time() - shot_create_started_at
             remote_url = (completed.get("metadata") or {}).get("url")
             if not remote_url:
                 raise AgnesVideoError("Agnes 任务已完成但响应未包含 metadata.url。")
             asset.status = "downloading"
             asset.remote_url = str(remote_url)
             _checkpoint(state, ep_key, ep_state)
+            download_started_at = time.time()
             local_path = client.download_video(
                 str(remote_url),
                 shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}.mp4",
             )
+            download_seconds = time.time() - download_started_at
+            # F3：按 task_id 回填渲染/下载耗时（幂等更新）。
+            try:
+                from src.db import db_update_agnes_usage_timing
+                db_update_agnes_usage_timing(
+                    task_id,
+                    render_seconds=render_seconds,
+                    download_seconds=download_seconds,
+                )
+            except Exception:
+                pass
             asset.status = "completed"
             asset.local_path = str(local_path)
             # V1：下载完成后采集文件哈希与真实媒体参数（时长/分辨率/帧率/音轨），
@@ -364,24 +396,8 @@ def _render_episode(
                 curr_first_frame=current_first_frame,
                 shot=shot,
             )
-            if not qc_result.passed:
-                # R4：镜头级重绘而非退回整集。删除当前镜 asset，标记 redraw_pending。
-                _mark_shot_for_redraw(
-                    ep_state,
-                    shot.shot_id,
-                    qc_result.issues,
-                    settings,
-                    shot_directory=shot_directory,
-                    shot_index=index,
-                )
-                _checkpoint(state, ep_key, ep_state)
-                return
-            if qc_result.issues:
-                print(f"   [{ep_key}/{shot.shot_id}] 质检告警：{'；'.join(qc_result.issues)}")
-            if qc_result.metrics:
-                metric_text = ", ".join(f"{k}={v:.3f}" for k, v in qc_result.metrics.items())
-                print(f"   [{ep_key}/{shot.shot_id}] QC 指标：{metric_text}")
-            # V2：把质检结果沉淀为结构化实验数据（含指标、首尾帧哈希），便于跨镜/跨集分析。
+            # F1：质检结果必须在判定前落库——失败样本同样要沉淀，
+            # 否则"哪些场景最容易跳变/重绘前后是否提升"无从分析。
             try:
                 from src.agnes_video import sha256_file
                 from src.db import db_insert_qc_result
@@ -401,6 +417,23 @@ def _render_episode(
                 )
             except Exception as exc:
                 print(f"   ⚠️ 质检结果沉淀失败（不阻断）：{exc}")
+            if not qc_result.passed:
+                # R4：镜头级重绘而非退回整集。删除当前镜 asset，标记 redraw_pending。
+                _mark_shot_for_redraw(
+                    ep_state,
+                    shot.shot_id,
+                    qc_result.issues,
+                    settings,
+                    shot_directory=shot_directory,
+                    shot_index=index,
+                )
+                _checkpoint(state, ep_key, ep_state)
+                return
+            if qc_result.issues:
+                print(f"   [{ep_key}/{shot.shot_id}] 质检告警：{'；'.join(qc_result.issues)}")
+            if qc_result.metrics:
+                metric_text = ", ".join(f"{k}={v:.3f}" for k, v in qc_result.metrics.items())
+                print(f"   [{ep_key}/{shot.shot_id}] QC 指标：{metric_text}")
             # 质检通过：提取当前镜尾帧，更新两条轨道供下一镜。
             if index < len(shots):
                 frame_path = shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}_tail.png"

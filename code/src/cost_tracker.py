@@ -30,6 +30,11 @@ class AgnesUsageRecord:
     width: int
     height: int
     created_at_unix: Optional[float] = None
+    # F3：排队/渲染/下载耗时与重绘次数（扩展字段）
+    queue_wait_seconds: Optional[float] = None
+    render_seconds: Optional[float] = None
+    download_seconds: Optional[float] = None
+    redraw_count: int = 0
 
 
 @dataclass
