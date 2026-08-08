@@ -119,40 +119,73 @@ def build_voiceover(
     dialogue_segments: list[tuple[str, float]],
     destination_dir: Path,
 ) -> TTSResult:
-    """Stitch per-line dialogue into a single voiceover track (G4b).
+    """Build a voiceover track timed to each shot (G4b / H1).
 
     dialogue_segments: [(dialogue_text, shot_duration_seconds)...]
-    When a TTS provider is configured, each non-empty line is synthesized and
-    concatenated (with silence padding to match shot duration) via ffmpeg. When
-    no provider is configured, returns audio_path=None so Agent6 keeps the
-    source audio (which, if DRAMAMATRIX_AGNES_VOICE is on, may already carry
-    Agnes-generated speech).
+    For each shot, synthesize the dialogue, then pad/trim that clip to the
+    shot's duration with silence so every line aligns to its own shot window.
+    The final track length equals the sum of all shot durations (== the video
+    length), so mix_audio_into_video never truncates the video. Lines without
+    dialogue become pure-silence segments of their shot duration.
     """
     if not tts_enabled():
         return TTSResult(audio_path=None, voiceover=False, segments_built=0)
     provider = tts_provider()
     if not provider:
-        # No independent TTS backend; rely on Agnes native voice (if enabled).
         return TTSResult(audio_path=None, voiceover=False, segments_built=0)
 
     destination_dir.mkdir(parents=True, exist_ok=True)
     segments_built = 0
-    clip_paths: list[Path] = []
-    for idx, (text, _duration) in enumerate(dialogue_segments):
-        if not text.strip():
-            continue
-        clip = destination_dir / f"line_{idx:03d}.mp3"
-        if synthesize_line(text, clip):
-            clip_paths.append(clip)
-            segments_built += 1
-    if not clip_paths:
+    timed_clips: list[Path] = []
+    for idx, (text, duration) in enumerate(dialogue_segments):
+        seg_duration = max(float(duration), 0.5)
+        if text.strip():
+            raw_clip = destination_dir / f"line_{idx:03d}.mp3"
+            if synthesize_line(text, raw_clip):
+                timed = _fit_clip_to_duration(raw_clip, seg_duration, destination_dir / f"timed_{idx:03d}.m4a")
+                if timed:
+                    timed_clips.append(timed)
+                    segments_built += 1
+                    continue
+        # No dialogue OR synth failed → silence segment of the shot duration.
+        silent = _make_silent_track(seg_duration, destination_dir / f"silence_{idx:03d}.m4a")
+        if silent:
+            timed_clips.append(silent)
+
+    if not timed_clips:
         return TTSResult(audio_path=None, voiceover=False, segments_built=0)
 
-    # Concatenate synthesized clips into one voiceover track.
-    voiceover_path = destination_dir / "voiceover.mp3"
-    if _concat_audio(clip_paths, voiceover_path):
+    voiceover_path = destination_dir / "voiceover.m4a"
+    if _concat_audio(timed_clips, voiceover_path):
+        # Clean up intermediate clips.
+        for clip in timed_clips:
+            clip.unlink(missing_ok=True)
         return TTSResult(audio_path=str(voiceover_path), voiceover=True, segments_built=segments_built)
     return TTSResult(audio_path=None, voiceover=False, segments_built=0)
+
+
+def _fit_clip_to_duration(clip: Path, target_seconds: float, destination: Path) -> Optional[Path]:
+    """Pad/trim an audio clip to exactly target_seconds (H1).
+
+    Uses ffmpeg apad/atrim so each dialogue line occupies exactly its shot
+    window; the next line starts at the next shot boundary, not immediately.
+    """
+    try:
+        import subprocess
+        ffmpeg = _require_binary("ffmpeg")
+    except (AgnesVideoError, ImportError):
+        return None
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    command = [
+        ffmpeg, "-y", "-i", str(clip),
+        "-filter:a", f"atrim=0:{target_seconds:.3f},asetpts=N/SR/TB,apad=whole_dur={target_seconds:.3f}",
+        "-c:a", "aac", "-b:a", "128k", str(destination),
+    ]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError:
+        return None
+    return destination if destination.is_file() and destination.stat().st_size > 0 else None
 
 
 def _concat_audio(clips: list[Path], destination: Path) -> bool:
@@ -218,10 +251,12 @@ def mix_audio_into_video(video_path: Path, audio_path: Optional[Path], destinati
 
     ffmpeg = _require_binary("ffmpeg")
     destination.parent.mkdir(parents=True, exist_ok=True)
+    # H1：去掉 -shortest——以视频时长为准，音频短于视频时尾部自然静音，
+    # 不截断视频。voiceover 已按镜头时长对齐补齐，通常与视频等长。
     command = [
         ffmpeg, "-y", "-i", str(video_path), "-i", str(audio_path),
         "-map", "0:v", "-map", "1:a",
-        "-c:v", "copy", "-c:a", "aac", "-shortest", str(destination),
+        "-c:v", "copy", "-c:a", "aac", str(destination),
     ]
     try:
         import subprocess

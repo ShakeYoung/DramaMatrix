@@ -4,7 +4,7 @@ then attach a voiceover track (TTS) produced from the shots' dialogue.
 
 from pathlib import Path
 
-from src.agnes_video import AgnesVideoError, concat_videos, episode_output_dir
+from src.agnes_video import AgnesVideoError, concat_videos, episode_output_dir, has_audio_stream
 from src.state import DramaState, EpisodeState, FeedbackLog
 from src.subtitles import build_ass_track, burn_subtitles
 from src.tts import build_voiceover, mix_audio_into_video
@@ -24,10 +24,13 @@ def process_agent6_editor(state: DramaState) -> DramaState:
             output = ep_dir / f"{ep_key}_master.mp4"
             final_video = concat_videos(inputs, output)
 
-            # T5: build a voiceover track from the storyboard dialogue and mix
-            # it into the master. If TTS is unavailable it degrades to keeping
-            # the master's (usually silent) audio.
-            voiceover = _apply_voiceover(ep_state, ep_dir)
+            # H4：若成片已含音频（Agnes 原生语音成功），保留原音轨，跳过独立 TTS；
+            # 仅在无声时才用独立 TTS 兜底。
+            voiceover = None
+            if has_audio_stream(final_video):
+                print(f"   {ep_key} 成片已含音频（疑似 Agnes 原生语音），保留原音轨。")
+            else:
+                voiceover = _apply_voiceover(ep_state, ep_dir)
             if voiceover:
                 muxed = mix_audio_into_video(final_video, Path(voiceover), ep_dir / f"{ep_key}_voiced.mp4")
                 ep_state.audio_track = str(voiceover)

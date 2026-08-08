@@ -177,5 +177,70 @@ class TTSProviderTests(unittest.TestCase):
         self.assertIsNone(result.audio_path)
 
 
+class TTSAlignmentTests(unittest.TestCase):
+    """H1: each dialogue line is timed to its shot; no -shortest truncation."""
+
+    def test_build_voiceover_pads_silence_per_shot(self):
+        from src.tts import build_voiceover
+        # 3 shots: line1(4s), empty(4s), line3(4s). Each segment must be fit to
+        # its shot duration, not concatenated raw.
+        segs = [("第一句", 4.0), ("", 4.0), ("第三句", 4.0)]
+        with patch.dict(os.environ, {"DRAMAMATRIX_TTS_PROVIDER": "edge",
+                                     "DRAMAMATRIX_TTS_ENABLED": "1"}, clear=False), \
+             patch("src.tts.synthesize_line", side_effect=lambda text, dest: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"mp3"), dest)[2]), \
+             patch("src.tts._fit_clip_to_duration", side_effect=lambda clip, dur, dest: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"fit"), dest)[2]) as fit, \
+             patch("src.tts._make_silent_track", side_effect=lambda dur, dest: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"sil"), dest)[2]) as silent, \
+             patch("src.tts._concat_audio", return_value=True):
+            result = build_voiceover(segs, Path(tempfile.mkdtemp()) / "audio")
+        self.assertTrue(result.voiceover)
+        self.assertEqual(result.segments_built, 2)  # 2 non-empty lines
+        # _fit_clip called for the 2 dialogue shots; _make_silent_track for the empty one.
+        self.assertEqual(fit.call_count, 2)
+        self.assertEqual(silent.call_count, 1)
+
+    def test_mix_audio_has_no_shortest(self):
+        import inspect
+        from src.tts import mix_audio_into_video
+        src = inspect.getsource(mix_audio_into_video)
+        # The ffmpeg command must not contain -shortest (which truncates video).
+        # Check the command-construction line, not comments that mention it.
+        command_lines = [l for l in src.splitlines() if "command" in l or '"-map"' in l or "aac" in l]
+        joined = "\n".join(command_lines)
+        self.assertNotIn('"-shortest"', joined)
+        self.assertNotIn("'-shortest'", joined)
+
+
+class ClipOverlapTests(unittest.TestCase):
+    """H3: overlapping hook/climax on short videos drops the duplicate."""
+
+    def test_short_video_drops_overlapping_climax(self):
+        from src.agents.agent7_growth import detect_emotion_segments
+        # 13s video, default hook=15s (capped to 13). hook covers 0-13, climax
+        # would cover ~0-13 too → overlap > 50% → only hook returned.
+        ep = EpisodeState(storyboard_data=[make_shot(f"s{i}", "A") for i in range(4)])
+        with patch.dict(os.environ, {}, clear=False):
+            segs = detect_emotion_segments(13.0, ep)
+        self.assertEqual(len(segs), 1)
+        self.assertEqual(segs[0][0], "hook")
+
+    def test_long_video_keeps_both(self):
+        from src.agents.agent7_growth import detect_emotion_segments
+        ep = EpisodeState(storyboard_data=[make_shot(f"s{i}", "A") for i in range(8)])
+        with patch.dict(os.environ, {"DRAMAMATRIX_GROWTH_CLIP_DURATION": "8",
+                                     "DRAMAMATRIX_GROWTH_CLIMAX_DURATION": "5"}, clear=False):
+            segs = detect_emotion_segments(60.0, ep)
+        self.assertEqual(len(segs), 2)
+
+
+class AudioDetectionTests(unittest.TestCase):
+    """H4: has_audio_stream detects audio; missing ffprobe → False (safe)."""
+
+    def test_no_ffprobe_returns_false(self):
+        from src.agnes_video import has_audio_stream
+        with patch("src.agnes_video.shutil.which", return_value=None):
+            with tempfile.TemporaryDirectory() as d:
+                self.assertFalse(has_audio_stream(Path(d) / "x.mp4"))
+
+
 if __name__ == "__main__":
     unittest.main()

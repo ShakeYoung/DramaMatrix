@@ -138,7 +138,9 @@ class MediaAgentTests(unittest.TestCase):
                 destination.write_bytes(b"clip")
                 return destination
 
-            with patch("src.agents.agent7_growth.video_duration", return_value=20.0), patch("src.agents.agent7_growth.cut_video", side_effect=fake_cut):
+            with patch("src.agents.agent7_growth.video_duration", return_value=20.0), patch("src.agents.agent7_growth.cut_video", side_effect=fake_cut), patch.dict(
+                os.environ, {"DRAMAMATRIX_GROWTH_CLIP_DURATION": "8", "DRAMAMATRIX_GROWTH_CLIMAX_DURATION": "5"}, clear=False
+            ):
                 process_agent7_growth(state)
             self.assertEqual(episode.status, "growth_ready")
             self.assertEqual(len(episode.growth_assets), 2)

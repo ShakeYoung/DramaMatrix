@@ -193,6 +193,10 @@ def _render_episode(
     # R8：加载场景参考图映射（部署时预生成角色/场景参考图并注册）。
     scene_references: dict[str, str] = load_scene_references()
     # G1：跨场景共享的容量节流器——任一 queue_full 即降级，成功创建即恢复。
+    # 注意：跨场景并发（run_segments）的基础设施已就绪（CapacityThrottle /
+    # scene_segments / run_segments），但尚未接入本循环——因为 Agnes 在单任务
+    # 在途时即出现 queue_full，审阅明确建议暂不提高并发。DRAMAMATRIX_MAX_IN_FLIGHT
+    # 当前仅作为预留配置；接入并发需要把本循环体重构为线程安全的段级 runner。
     throttle = CapacityThrottle()
     in_flight = max_in_flight()
     if not is_resume:

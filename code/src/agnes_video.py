@@ -725,6 +725,28 @@ def video_duration(path: Path) -> float:
         raise AgnesVideoError(f"无法读取视频时长: {path}") from exc
 
 
+def has_audio_stream(path: Path) -> bool:
+    """Whether a media file contains an audio stream (H4).
+
+    Used to decide whether Agnes produced a voiced clip (skip TTS) or a silent
+    one (fall back to independent TTS). Returns False when ffprobe is absent so
+    the pipeline assumes silent and applies TTS (safe default).
+    """
+    ffprobe = shutil.which("ffprobe")
+    if not ffprobe:
+        return False
+    command = [
+        ffprobe, "-v", "error", "-select_streams", "a",
+        "-show_entries", "stream=codec_type", "-of", "default=noprint_wrappers=1:nokey=1",
+        str(path),
+    ]
+    try:
+        result = subprocess.run(command, check=True, capture_output=True, text=True)
+        return "audio" in result.stdout.strip().lower()
+    except subprocess.CalledProcessError:
+        return False
+
+
 def cut_video(source: Path, destination: Path, start_seconds: float, duration_seconds: float) -> Path:
     ffmpeg = _require_binary("ffmpeg")
     destination.parent.mkdir(parents=True, exist_ok=True)

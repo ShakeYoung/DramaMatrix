@@ -59,6 +59,16 @@ def detect_emotion_segments(total_seconds: float, ep_state: EpisodeState) -> lis
         last_start = mean * (len(ep_state.storyboard_data) - 1)
         if last_start > 0:
             last_shot_start = max(0.0, min(last_start, total_seconds - climax_duration))
+    # H3：重叠/相同保护——hook 与 climax 区间重叠超过阈值时只保留 hook。
+    # 对短片（如总时长 ≤ hook 时长）climax 会与 hook 几乎完全重叠，导出两个
+    # 近乎相同的切片无意义。重叠比例 > 0.5 视为重复。
+    hook_end = hook_duration
+    climax_end = last_shot_start + climax_duration
+    overlap = max(0.0, min(hook_end, climax_end) - max(0.0, last_shot_start))
+    overlap_ratio = overlap / min(hook_duration, climax_duration) if min(hook_duration, climax_duration) > 0 else 0
+    if overlap_ratio > 0.5:
+        print(f"   ⚠️ hook 与 climax 重叠 {overlap_ratio:.0%}，短片只保留 hook 切片。")
+        return segments
     segments.append(("climax", last_shot_start, climax_duration))
     return segments
 
