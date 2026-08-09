@@ -21,7 +21,7 @@ _DISPOSITION = {
     "waiting_for_connectivity": "网络恢复后 --resume 续跑",
     "submission_uncertain": "到 Agnes 控制台核对任务后人工确认",
     "storyboard_blocked": "修正分镜（数量/生成失败）后重置状态",
-    "awaiting_review": "人工审阅 review.json 并标记后重跑（请用 review_approver）",
+    "awaiting_review": "后台模式：完成 review.json 决策后用同一项目续跑；前台可使用 interactive 模式",
     "director_rejected": "分镜需重写，检查 QC/内容策略反馈",
     "editing_failed": "检查 ffmpeg/素材完整性",
     "growth_failed": "检查投流切片导出相关 ffmpeg/路径",

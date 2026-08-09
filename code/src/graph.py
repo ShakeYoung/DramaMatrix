@@ -70,15 +70,6 @@ def route_after_cycles(state: DramaState) -> str:
     return END
 
 
-def _has_review_redraw(project_id, ep) -> bool:
-    """Whether an awaiting_review episode has any .redraw decision (E1)."""
-    try:
-        from src.review import pending_shot_ids
-        return bool(pending_shot_ids(project_id, _ep_key(ep), ep, decision="redraw"))
-    except Exception:
-        return False
-
-
 def _ep_key(ep) -> str:
     return ep.script_data.ep_id if ep.script_data and ep.script_data.ep_id else "ep"
 
@@ -102,15 +93,22 @@ def route_from_start(state: DramaState) -> str:
         if any(ep.status == "storyboard_blocked" for ep in episodes):
             print(">> Router: 检测到 storyboard_blocked，恢复中止（需人工修正分镜后重置状态）")
             return END
-        # E1：人工质检——awaiting_review 若有 .redraw 决定则回 Agent5 重绘；
-        # 未审阅完则暂停；全部 approve 则放行到 Agent6。
+        # E1：后台人工质检——未审阅完则暂停；决定齐全后统一由
+        # Agent5 应用 approve/redraw/delete 状态转换。
         review_eps = [ep for ep in episodes if ep.status == "awaiting_review"]
-        if review_eps and any(_has_review_redraw(project_id, ep) for ep in review_eps):
-            print(">> Router: 审阅清单存在 .redraw 决定，回 Agent5 重绘。")
-            return "agent5_director"
         if review_eps and not all(_review_handled(project_id, ep) for ep in review_eps):
+            try:
+                from src.review import interactive_review_available, review_mode
+                if review_mode() == "interactive" and interactive_review_available():
+                    print(">> Router: 检测到未完成审阅，交由 Agent5 在当前终端恢复交互。")
+                    return "agent5_director"
+            except Exception as exc:
+                print(f">> Router: 无法启动交互审阅，安全暂停：{exc}")
             print(">> Router: 检测到 await review，暂停等待人工标记。")
             return END
+        if review_eps:
+            print(">> Router: 人工审阅决定已齐全，交由 Agent5 应用。")
+            return "agent5_director"
         if any(ep.status == "submission_uncertain" for ep in episodes):
             return END
         if any(ep.status in {"script_done", "director_rejected"} for ep in episodes):

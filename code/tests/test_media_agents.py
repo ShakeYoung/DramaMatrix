@@ -50,6 +50,24 @@ class MediaAgentTests(unittest.TestCase):
         os.environ["DRAMAMATRIX_ALLOW_NO_CHARACTERS"] = "1"
         # These tests exercise render mechanics, not manual review; disable review gate.
         os.environ["DRAMAMATRIX_REVIEW_MODE"] = "0"
+        media_integrity_patcher = patch(
+            "src.agnes_video.media_integrity",
+            return_value={
+                "sha256": "test-video",
+                "file_size_bytes": 5,
+                "actual_duration": 4.0,
+                "width": 720,
+                "height": 1280,
+                "frame_rate": 24.0,
+                "bit_rate": 1000,
+                "has_audio": False,
+                "audio_duration": None,
+                "has_dialogue": False,
+                "probe_ok": True,
+            },
+        )
+        media_integrity_patcher.start()
+        self.addCleanup(media_integrity_patcher.stop)
 
     def tearDown(self):
         os.environ.pop("DRAMAMATRIX_ALLOW_NO_CHARACTERS", None)

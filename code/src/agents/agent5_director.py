@@ -548,17 +548,48 @@ def _render_episode(
         )
         return
     # E1：人工质检点。若开启，生成审阅清单并暂停，等人工标记后再进 Agent6。
+    configured_review = os.getenv("DRAMAMATRIX_REVIEW_MODE", "background").strip().lower()
+    mode = "off" if configured_review in {"0", "false", "no", "off", "disabled"} else "background"
     try:
-        from src.review import review_mode_enabled, write_review_manifest
-        if review_mode_enabled():
+        from src.review import (
+            apply_review_decisions,
+            interactive_review_available,
+            review_mode,
+            write_review_manifest,
+        )
+        mode = review_mode()
+        if mode != "off":
             write_review_manifest(state["project_id"], ep_key, ep_state)
             ep_state.status = "awaiting_review"
             _checkpoint(state, ep_key, ep_state)
+            if mode == "interactive" and interactive_review_available():
+                print(f"👤 {ep_key} 渲染完成，进入当前终端人工审阅。")
+                from src.review_approver import interactive_approve
+                interactive_approve(state["project_id"], ep_key)
+                result = apply_review_decisions(state["project_id"], ep_key, ep_state)
+                _checkpoint(state, ep_key, ep_state)
+                if result == "video_generated":
+                    print(f"✅ {ep_key} 人工审阅全部通过，继续进入 Agent6。")
+                elif result == "storyboard_done":
+                    print(f"↻ {ep_key} 已标记重绘镜头，继续由 Agent5 处理。")
+                elif result == "awaiting_review":
+                    print(f"⏸️ {ep_key} 仍有镜头未完成审阅，已暂停等待。")
+                else:
+                    print(f"❌ {ep_key} 人工审阅后无剩余镜头，已停止该集。")
+                return
+            if mode == "interactive":
+                print("   ⚠️ 当前进程无交互终端（如 nohup），已自动切换为 background 审阅。")
             print(f"⏸️ {ep_key} 渲染完成，已生成审阅清单（awaiting_review）。")
-            print("   请运行 python -m src.review_approver <project_id> <ep_key> 标记各镜头后重跑。")
+            print("   请完成 decisions.json/审阅 CLI 后，以同一 project_id --resume 续跑。")
             return
     except Exception as exc:
-        print(f"   ⚠️ 生成审阅清单失败（不阻断，进入视频生成）：{exc}")
+        if mode != "off":
+            # 审阅开启时绝不能因终端 EOF、清单 I/O 等异常绕过人工门禁。
+            ep_state.status = "awaiting_review"
+            _checkpoint(state, ep_key, ep_state)
+            print(f"   ⚠️ 人工审阅未完成，已安全暂停（不会绕过审阅门禁）：{exc}")
+            return
+        print(f"   ⚠️ 审阅模块不可用，按 off 模式继续：{exc}")
     ep_state.status = "video_generated"
     _checkpoint(state, ep_key, ep_state)
     print(f"✅ {ep_key} 的 {len(ep_state.video_assets)} 个分镜视频已下载完成。")
@@ -602,25 +633,34 @@ def process_agent5_director(state: DramaState) -> DramaState:
     targets = []
     for key, ep in state["episodes"].items():
         if ep.status == "awaiting_review":
-            # E1：人工审阅后——应用 decisions。
+            # E1：统一应用后台决定；若以前台模式恢复到未完成审阅，
+            # 由总进程在当前终端直接继续提问。
             try:
-                from src.review import pending_shot_ids, load_decisions
-                decisions = load_decisions(state["project_id"], key)
-                for sid, decision in decisions.items():
-                    if decision == "delete":
-                        # 删除该镜：移出其 asset 与 storyboard 条目
-                        ep.storyboard_data = [s for s in ep.storyboard_data if s.shot_id != sid]
-                        ep.video_assets = [a for a in ep.video_assets if a.shot_id != sid]
-                    elif decision == "redraw":
-                        # 重绘：重置其 asset（删除本地已下载文件以触发重新生成）
-                        ep.video_assets = [a for a in ep.video_assets if a.shot_id != sid]
-                # 若仍剩待渲染镜头（有 redraw/未删光），回到渲染重绘
-                if ep.video_assets and pending_shot_ids(state["project_id"], key, ep, decision="redraw"):
-                    ep.status = "storyboard_done"
-                elif not ep.storyboard_data:
-                    # 全部删除 → 无内容，标记失败
-                    ep.status = "render_failed"
+                from src.review import (
+                    apply_review_decisions,
+                    interactive_review_available,
+                    review_mode,
+                )
+                result = apply_review_decisions(state["project_id"], key, ep)
+                if (
+                    result == "awaiting_review"
+                    and review_mode() == "interactive"
+                    and interactive_review_available()
+                ):
+                    print(f"👤 {key} 存在未完成的人工审阅，已在当前终端恢复。")
+                    from src.review_approver import interactive_approve
+                    interactive_approve(state["project_id"], key)
+                    result = apply_review_decisions(state["project_id"], key, ep)
+                    _checkpoint(state, key, ep)
+                if result == "awaiting_review":
+                    continue
+                if result == "video_generated":
+                    print(f"✅ {key} 人工审阅全部通过，放行至 Agent6。")
+                    state["episodes"][key] = ep
+                    continue
+                if result == "render_failed":
                     print(f"⚠️ {key} 人工审阅后无剩余镜头，标记 render_failed。")
+                    state["episodes"][key] = ep
                     continue
             except Exception as exc:
                 print(f"   ⚠️ 应用审阅决定失败（{key}）：{exc}")
@@ -640,6 +680,12 @@ def process_agent5_director(state: DramaState) -> DramaState:
         targets.append((key, ep))
     if not targets:
         print("没有等待 Agnes 渲染的剧集。")
+        if any(ep.status == "awaiting_review" for ep in state["episodes"].values()):
+            state["system_status"] = "awaiting_review"
+        elif any(ep.status == "video_generated" for ep in state["episodes"].values()):
+            state["system_status"] = "video_assets_downloaded"
+        elif any(ep.status == "render_failed" for ep in state["episodes"].values()):
+            state["system_status"] = "blocked_on_agnes_render"
         return state
 
     try:
@@ -703,6 +749,8 @@ def process_agent5_director(state: DramaState) -> DramaState:
         state["system_status"] = "blocked_on_agnes_render"
     elif any(ep.status == "render_partial" for _, ep in targets):
         state["system_status"] = "waiting_for_full_render"
+    elif any(ep.status == "awaiting_review" for _, ep in targets):
+        state["system_status"] = "awaiting_review"
     else:
         state["system_status"] = "video_assets_downloaded"
     return state

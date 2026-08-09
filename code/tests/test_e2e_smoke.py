@@ -68,6 +68,21 @@ class EndToEndSmokeTests(unittest.TestCase):
         with mock.patch("src.agents.agent5_director.AgnesVideoClient", return_value=FakeClient()), mock.patch(
             "src.agents.agent5_director.AgnesVideoSettings.from_environment",
             return_value=AgnesVideoSettings(api_key="x"),
+        ), mock.patch(
+            "src.agnes_video.media_integrity",
+            return_value={
+                "sha256": "test-video",
+                "file_size_bytes": 5,
+                "actual_duration": 4.0,
+                "width": 720,
+                "height": 1280,
+                "frame_rate": 24.0,
+                "bit_rate": 1000,
+                "has_audio": False,
+                "audio_duration": None,
+                "has_dialogue": False,
+                "probe_ok": True,
+            },
         ), mock.patch("src.agents.agent6_editor.concat_videos", side_effect=fake_concat), mock.patch(
             "src.agents.agent7_growth.video_duration", return_value=60.0
         ), mock.patch("src.agents.agent7_growth.cut_video", side_effect=fake_cut), mock.patch(

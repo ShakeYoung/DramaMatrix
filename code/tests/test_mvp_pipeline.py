@@ -70,6 +70,115 @@ class ReviewManifestTests(unittest.TestCase):
             (review_dir / "decisions.json").write_text(json.dumps({"s1": "approve", "s2": "approve"}), encoding="utf-8")
             self.assertTrue(all_decided("p1", "ep_01", ep))
 
+    def test_review_mode_parsing(self):
+        from src.review import review_mode
+        for value, expected in [
+            ("interactive", "interactive"),
+            ("background", "background"),
+            ("1", "background"),
+            ("off", "off"),
+            ("0", "off"),
+        ]:
+            with self.subTest(value=value), patch.dict(
+                os.environ, {"DRAMAMATRIX_REVIEW_MODE": value}, clear=False
+            ):
+                self.assertEqual(review_mode(), expected)
+
+    def test_all_approve_transitions_to_video_generated(self):
+        from src.review import apply_review_decisions, write_review_manifest, _review_dir
+        ep = _ep(
+            [
+                GeneratedVideoAsset(shot_id="s1", video_id="v1", status="completed", prompt="p"),
+                GeneratedVideoAsset(shot_id="s2", video_id="v2", status="completed", prompt="p"),
+            ],
+            shots=[make_shot("s1"), make_shot("s2")],
+            status="awaiting_review",
+        )
+        with tempfile.TemporaryDirectory() as d, patch.dict(
+            os.environ, {"DRAMAMATRIX_OUTPUT_DIR": d}, clear=False
+        ):
+            write_review_manifest("p1", "ep_01", ep)
+            (_review_dir("p1", "ep_01") / "decisions.json").write_text(
+                json.dumps({"s1": "approve", "s2": "approve"}), encoding="utf-8"
+            )
+            self.assertEqual(apply_review_decisions("p1", "ep_01", ep), "video_generated")
+        self.assertEqual(len(ep.video_assets), 2)
+
+    def test_all_redraw_transitions_and_consumes_decisions(self):
+        from src.review import apply_review_decisions, load_decisions, write_review_manifest, _review_dir
+        ep = _ep(
+            [
+                GeneratedVideoAsset(shot_id="s1", video_id="v1", status="completed", prompt="p"),
+                GeneratedVideoAsset(shot_id="s2", video_id="v2", status="completed", prompt="p"),
+            ],
+            shots=[make_shot("s1"), make_shot("s2")],
+            status="awaiting_review",
+        )
+        with tempfile.TemporaryDirectory() as d, patch.dict(
+            os.environ, {"DRAMAMATRIX_OUTPUT_DIR": d}, clear=False
+        ):
+            write_review_manifest("p1", "ep_01", ep)
+            (_review_dir("p1", "ep_01") / "decisions.json").write_text(
+                json.dumps({"s1": "redraw", "s2": "redraw"}), encoding="utf-8"
+            )
+            self.assertEqual(apply_review_decisions("p1", "ep_01", ep), "storyboard_done")
+            self.assertEqual(load_decisions("p1", "ep_01"), {})
+        self.assertEqual(ep.video_assets, [])
+
+    def test_all_delete_transitions_to_render_failed(self):
+        from src.review import apply_review_decisions, write_review_manifest, _review_dir
+        ep = _ep(
+            [GeneratedVideoAsset(shot_id="s1", video_id="v1", status="completed", prompt="p")],
+            shots=[make_shot("s1")],
+            status="awaiting_review",
+        )
+        with tempfile.TemporaryDirectory() as d, patch.dict(
+            os.environ, {"DRAMAMATRIX_OUTPUT_DIR": d}, clear=False
+        ):
+            write_review_manifest("p1", "ep_01", ep)
+            (_review_dir("p1", "ep_01") / "decisions.json").write_text(
+                json.dumps({"s1": "delete"}), encoding="utf-8"
+            )
+            self.assertEqual(apply_review_decisions("p1", "ep_01", ep), "render_failed")
+        self.assertEqual(ep.storyboard_data, [])
+
+    def test_completed_background_review_routes_through_agent5(self):
+        from src.graph import route_from_start
+        from src.review import write_review_manifest, _review_dir
+        ep = _ep(
+            [GeneratedVideoAsset(shot_id="s1", video_id="v1", status="completed", prompt="p")],
+            status="awaiting_review",
+        )
+        with tempfile.TemporaryDirectory() as d, patch.dict(
+            os.environ, {"DRAMAMATRIX_OUTPUT_DIR": d}, clear=False
+        ):
+            write_review_manifest("p1", "ep_01", ep)
+            (_review_dir("p1", "ep_01") / "decisions.json").write_text(
+                json.dumps({"s1": "approve"}), encoding="utf-8"
+            )
+            self.assertEqual(
+                route_from_start({"project_id": "p1", "episodes": {"ep_01": ep}}),
+                "agent5_director",
+            )
+
+    def test_incomplete_interactive_review_routes_through_agent5(self):
+        from src.graph import route_from_start
+        from src.review import write_review_manifest
+        ep = _ep(
+            [GeneratedVideoAsset(shot_id="s1", video_id="v1", status="completed", prompt="p")],
+            status="awaiting_review",
+        )
+        with tempfile.TemporaryDirectory() as d, patch.dict(
+            os.environ,
+            {"DRAMAMATRIX_OUTPUT_DIR": d, "DRAMAMATRIX_REVIEW_MODE": "interactive"},
+            clear=False,
+        ), patch("src.review.interactive_review_available", return_value=True):
+            write_review_manifest("p1", "ep_01", ep)
+            self.assertEqual(
+                route_from_start({"project_id": "p1", "episodes": {"ep_01": ep}}),
+                "agent5_director",
+            )
+
 
 class PublishExportTests(unittest.TestCase):
     """E2: publish package (clips + meta + cover)."""

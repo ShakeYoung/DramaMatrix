@@ -321,6 +321,21 @@ class ChainGenerationIntegrationTests(unittest.TestCase):
         ), patch(
             "src.agnes_video.extract_last_frame",
             side_effect=lambda v, d: (d.parent.mkdir(parents=True, exist_ok=True), d.write_bytes(b"png"), d)[2],
+        ), patch(
+            "src.agnes_video.media_integrity",
+            return_value={
+                "sha256": "test-video",
+                "file_size_bytes": 5,
+                "actual_duration": 4.0,
+                "width": 720,
+                "height": 1280,
+                "frame_rate": 24.0,
+                "bit_rate": 1000,
+                "has_audio": False,
+                "audio_duration": None,
+                "has_dialogue": False,
+                "probe_ok": True,
+            },
         ):
             process_agent5_director(state)
         return client

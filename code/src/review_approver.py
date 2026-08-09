@@ -11,7 +11,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import sys
 from pathlib import Path
 
 from src.agnes_video import episode_output_dir
@@ -21,13 +20,13 @@ def _review_dir(project_id: str, ep_key: str) -> Path:
     return episode_output_dir(project_id, ep_key) / "review"
 
 
-def interactive_approve(project_id: str, ep_key: str) -> None:
+def interactive_approve(project_id: str, ep_key: str) -> dict[str, str]:
     review_dir = _review_dir(project_id, ep_key)
     manifest_path = review_dir / "review.json"
     decisions_path = review_dir / "decisions.json"
     if not manifest_path.exists():
         print(f"❌ 未找到审阅清单：{manifest_path}\n（先运行流水线生成视频）")
-        sys.exit(1)
+        raise FileNotFoundError(f"未找到审阅清单：{manifest_path}")
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
     decisions = json.loads(decisions_path.read_text(encoding="utf-8")) if decisions_path.exists() else {}
     print(f"== 审阅清单：{project_id}/{ep_key} ==")
@@ -53,6 +52,7 @@ def interactive_approve(project_id: str, ep_key: str) -> None:
             print(f"  保留当前决定: {cur}")
     decisions_path.write_text(json.dumps(decisions, ensure_ascii=False, indent=2), encoding="utf-8")
     print(f"\n✅ 已写回 {decisions_path}")
+    return decisions
 
 
 def main(argv=None):
@@ -60,8 +60,13 @@ def main(argv=None):
     parser.add_argument("project_id")
     parser.add_argument("ep_key")
     args = parser.parse_args(argv)
-    interactive_approve(args.project_id, args.ep_key)
+    try:
+        interactive_approve(args.project_id, args.ep_key)
+    except FileNotFoundError as exc:
+        print(f"❌ {exc}\n（先运行流水线生成视频）")
+        return 1
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())

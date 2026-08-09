@@ -72,7 +72,8 @@ python main.py --project-id Drama_20260307_001
 
 - **断点续跑**：同一 `--project-id` 重跑即从上次未完成阶段继续
 - **分集生产**：`DRAMAMATRIX_EPISODE=ep_01 python main.py` 只处理指定集
-- **人工审阅**：渲染完成后运行 `python -m src.review_approver <project> <ep>` 逐镜标记，再重跑推进
+- **前台人工审阅**：`DRAMAMATRIX_REVIEW_MODE=interactive python main.py --project-id <project>`，到审阅点直接在当前终端操作并继续
+- **后台人工审阅**：`DRAMAMATRIX_REVIEW_MODE=background nohup ...`，完成清单后以同一项目 ID 断点续跑
 - **故障处置**：流程阻塞时自动生成 `failure_report.json`，按清单处置后重跑
 
 ---
@@ -102,7 +103,7 @@ python main.py --project-id Drama_20260307_001
 | `DRAMAMATRIX_MAX_CYCLES` | `1` | 市场回环周期上限（>1 开启闭环） |
 | `DRAMAMATRIX_CONDITIONAL_GENERATION` | `0` | 条件链式生成（首帧/尾帧传递） |
 | `DRAMAMATRIX_VIDEO_PROVIDER` | `agnes` | 视频供应商（agnes / dummy） |
-| `DRAMAMATRIX_REVIEW_MODE` | `1` | 渲染后暂停人工审阅 |
+| `DRAMAMATRIX_REVIEW_MODE` | `background` | `interactive` 前台交互 / `background` 后台暂停 / `off` 跳过审阅 |
 | `DRAMAMATRIX_PUBLISH_EXPORT` | `1` | 完成后导出投放包 |
 | `DRAMAMATRIX_TTS_PROVIDER` | 空 | 配音后端（edge / openai） |
 | `DRAMAMATRIX_MAX_AGNES_CREATES` | `0` | 单项目创建预算护栏（0=不限） |
