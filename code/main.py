@@ -5,7 +5,8 @@ from src.graph import build_drama_matrix_graph
 from src.agnes_video import AgnesVideoClient, AgnesVideoError, AgnesVideoSettings
 from src.network import configure_proxy_environment
 from src.project_state import new_project_state, restore_project_state
-from src.runtime_options import apply_runtime_options, parse_runtime_options
+from src.runtime_options import apply_runtime_options, parse_runtime_options, run_mode
+from src.run_lock import ProjectLockHeldError, acquire_project_lock
 from src.text_model import has_text_model_credentials
 
 # 加载环境变量（文本模型和 Agnes 视频模型共用该配置文件）
@@ -15,6 +16,12 @@ load_dotenv()
 def main(argv=None):
     configure_proxy_environment()
     apply_runtime_options(parse_runtime_options(argv))
+    try:
+        mode = run_mode()
+    except ValueError as exc:
+        print(f"❌ {exc}")
+        return 2
+    print(f"→ 运行模式：{mode}" + ("（模拟回退可用并带标记）" if mode == "demo" else "（模拟回退一律阻塞）"))
     if not os.getenv("AGNES_API_KEY"):
         # 不再硬阻塞：允许纯文本阶段（选品/立项/编剧/分镜）先行运行，
         # 视频生成阶段 Agent 5 会在缺少密钥时进入可恢复的配置阻塞状态。
@@ -28,11 +35,28 @@ def main(argv=None):
             return 2
         return 0
     if not has_text_model_credentials():
-        print("⚠️ 未检测到文本模型密钥；Agent 2–4 将使用其现有的回退逻辑。")
-        
+        if mode == "production":
+            print("⚠️ 未检测到文本模型密钥；production 模式下 Agent 2/3 将阻塞")
+            print("   （blocked_on_text_model / blocked_on_script），配置密钥后 --resume 重试。")
+        else:
+            print("⚠️ 未检测到文本模型密钥；demo 模式下 Agent 2–4 使用回退逻辑（带模拟标记）。")
+
     app = build_drama_matrix_graph()
-    
+
     project_id = os.getenv("DRAMAMATRIX_PROJECT_ID", "Drama_20260307_001")
+    # R1：项目运行锁——同一项目禁止两个生产进程并发（重复提交付费任务/互相覆盖快照）。
+    try:
+        lock_fd, lock_path = acquire_project_lock(project_id)
+    except ProjectLockHeldError as exc:
+        print(f"❌ {exc}")
+        return 3
+    try:
+        return _run_production(app, project_id, mode)
+    finally:
+        os.close(lock_fd)  # fd 关闭即释放 flock；锁文件留存供下次覆写
+
+
+def _run_production(app, project_id: str, mode: str) -> int:
     resume_enabled = os.getenv("DRAMAMATRIX_RESUME", "1").strip().lower() not in {"0", "false", "no"}
     snapshot = db_get_project_state_snapshot(project_id) if resume_enabled else None
     if snapshot:
@@ -47,14 +71,20 @@ def main(argv=None):
         initial_state_dict["run_context"] = capture_run_context()
     except Exception as exc:
         print(f"⚠️ 运行上下文采集失败（不阻断）：{exc}")
+    if isinstance(initial_state_dict.get("run_context"), dict):
+        initial_state_dict["run_context"]["run_mode"] = mode
 
-    # E4：按集限定——只处理指定集，便于分批投产（DRAMAMATRIX_EPISODE 或缺省全处理）。
+    # E4/R1：按集限定——本进程内只处理指定集（路由/Agent 只见目标集），
+    # 其余集原样保留在项目快照中（db_save_project_state 按键合并，不会删除）。
     episode_filter = os.getenv("DRAMAMATRIX_EPISODE", "").strip()
     if episode_filter and initial_state_dict.get("episodes"):
         episodes = initial_state_dict["episodes"]
         if episode_filter in episodes:
+            preserved = [key for key in episodes if key != episode_filter]
             initial_state_dict["episodes"] = {episode_filter: episodes[episode_filter]}
-            print(f"→ 按集限定：仅处理 {episode_filter}")
+            if isinstance(initial_state_dict.get("run_context"), dict):
+                initial_state_dict["run_context"]["target_episode"] = episode_filter
+            print(f"→ 按集限定：仅处理 {episode_filter}（其余 {len(preserved)} 集保留在快照中）")
         else:
             print(f"⚠️ 指定集 {episode_filter} 不在当前项目中，已忽略该限定。")
 

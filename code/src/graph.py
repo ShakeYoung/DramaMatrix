@@ -10,7 +10,31 @@ from src.agents.agent6_editor import process_agent6_editor
 from src.agents.agent7_growth import process_agent7_growth
 from src.agents.agent8_analytics import process_agent8_analytics
 
+def _is_system_blocked(state: DramaState) -> bool:
+    """R1：系统级阻塞/等待状态（blocked_* / waiting_*）——本次运行结束。
+
+    各阻塞点（缺书源/文本模型失败/编剧失败/等待投放数据）修复配置后
+    --resume 会由 route_from_start 自然回到对应节点重试。
+    """
+    status = state.get("system_status", "") or ""
+    return status.startswith(("blocked_", "waiting_"))
+
+
+def route_after_agent1(state: DramaState) -> str:
+    # R1：agent1 缺真实书源时置 blocked_on_source——直接结束本次运行，
+    # 不能带着空素材流入 agent2 空转消耗换书额度。
+    if _is_system_blocked(state):
+        print(f">> Router: 检测到系统阻塞状态 {state.get('system_status')}，本次运行结束。")
+        return END
+    return "agent2_hook_analyzer"
+
+
 def route_after_agent2(state: DramaState) -> str:
+    # R1：评审模型失败（blocked_on_text_model）不是"被否换书"——先于
+    # 换书逻辑判断，避免失败被误当作退回重选消耗 scout_attempts。
+    if _is_system_blocked(state):
+        print(f">> Router: 检测到系统阻塞状态 {state.get('system_status')}，本次运行结束。")
+        return END
     # 评审未通过时，若换书尝试次数未达上限则退回 Agent 1 换一本；否则结束。
     report = state.get("source_material", {}).get("report")
     if not report or not report.is_approved:
@@ -27,8 +51,17 @@ def _all_episodes_finished(episodes) -> bool:
     """Whether every episode has left the production flow (completed or terminal-failed)."""
     if not episodes:
         return False
-    terminal = {"edit_completed", "growth_ready", "growth_failed", "editing_failed"}
+    terminal = {"edit_completed", "growth_ready", "growth_failed", "editing_failed", "analytics_done"}
     return all(ep.status in terminal for ep in episodes.values())
+
+
+def route_after_agent3(state: DramaState) -> str:
+    # R1：编剧失败（blocked_on_script）保留失败状态，不进入分镜——
+    # 否则空 episodes/半成品会流入 agent4 产出"格式完整但故事不成立"的分镜。
+    if _is_system_blocked(state):
+        print(f">> Router: 检测到系统阻塞状态 {state.get('system_status')}，本次运行结束。")
+        return END
+    return "agent4_storyboard"
 
 
 def _render_failed_retryable(ep) -> bool:
@@ -56,11 +89,19 @@ def _has_retryable_render_failed(episodes) -> bool:
 def route_after_cycles(state: DramaState) -> str:
     """Decide whether to loop back to Agent 1 for another market-driven cycle.
 
-    Agent 8 increments task_cycle when it completes a cycle; here we compare the
-    (now completed) cycle count against the configured upper bound. So the check
-    is `<=`: when task_cycle has just reached max_cycles, we still run that final
-    cycle; only when it exceeds the bound do we stop.
+    R1：自动换书回环默认关闭（DRAMAMATRIX_AUTO_NEXT_CYCLE=0）——回环会在
+    同一项目、同集键（ep_01...）、同输出路径上开新书，旧书剧集残留/被覆盖。
+    开启前必须先建立"项目—作品—周期"隔离。等待投放数据（waiting_*）时
+    也绝不进入下一周期。
     """
+    if _is_system_blocked(state):
+        print(f">> Router: 检测到系统等待/阻塞状态 {state.get('system_status')}，不进入下一周期。")
+        return END
+    auto_next = os.getenv("DRAMAMATRIX_AUTO_NEXT_CYCLE", "0").strip().lower() in {"1", "true", "yes"}
+    if not auto_next:
+        if _all_episodes_finished(state.get("episodes", {})):
+            print(">> 市场回环已关闭（DRAMAMATRIX_AUTO_NEXT_CYCLE=0），本项目生产结束。")
+        return END
     cycle = state.get("task_cycle", 1)
     max_cycles = int(os.getenv("DRAMAMATRIX_MAX_CYCLES", "1"))
     if _all_episodes_finished(state.get("episodes", {})) and cycle <= max_cycles:
@@ -128,6 +169,34 @@ def route_from_start(state: DramaState) -> str:
             return "agent5_director"
         if any(ep.status == "video_generated" for ep in episodes):
             return "agent6_editor"
+        # R1：agent6/agent7 的失败状态此前是死路（无路由分支，resume 直接 END，
+        # 无法重试）。修复 ffmpeg/素材/路径后 --resume 应能从失败步骤重进。
+        if any(ep.status == "editing_failed" for ep in episodes):
+            print(">> Router: 检测到 editing_failed，恢复进入 Agent 6 重试后期合成。")
+            return "agent6_editor"
+        if any(ep.status == "growth_failed" for ep in episodes):
+            print(">> Router: 检测到 growth_failed，恢复进入 Agent 7 重试投流切片。")
+            return "agent7_growth"
+        # R2：整集验收——已 approve 进入 Agent7；rework 回 Agent6 重合成；
+        # 未决定则 END 暂停（人工核片）。
+        review_eps = [ep for ep in episodes if ep.status == "awaiting_episode_review"]
+        if review_eps:
+            for ep in review_eps:
+                ep_key = _ep_key(ep)
+                try:
+                    from src.episode_review import episode_approved, episode_rework
+
+                    if episode_approved(project_id, ep_key):
+                        print(f">> Router: {ep_key} 整集验收已通过，进入投流。")
+                        return "agent7_growth"
+                    if episode_rework(project_id, ep_key):
+                        print(f">> Router: {ep_key} 整集验收标记 rework，重走 Agent 6 合成。")
+                        return "agent6_editor"
+                except Exception as exc:
+                    print(f">> Router: 读取整集验收决定失败（{exc}），暂停。")
+                    return END
+            print(">> Router: 有剧集等待整集验收（episode_review），暂停等待人工核片。")
+            return END
         if any(ep.status == "edit_completed" for ep in episodes):
             return "agent7_growth"
         if any(ep.status == "growth_ready" for ep in episodes):
@@ -177,6 +246,10 @@ def route_next_step_for_episode(state: DramaState) -> str:
     if any(ep.status == "awaiting_review" for ep in episodes):
         print(">> Router: 有剧集等待人工审阅，本次运行暂停。")
         return END
+    # R2：整集验收未决时暂停本次运行（approve/rework 由下次 resume 路由）。
+    if any(ep.status == "awaiting_episode_review" for ep in episodes):
+        print(">> Router: 有剧集等待整集验收，本次运行暂停。")
+        return END
     if any(ep.status == "video_generated" for ep in episodes):
         return "agent6_editor"
     if any(ep.status == "edit_completed" for ep in episodes):
@@ -217,8 +290,17 @@ def build_drama_matrix_graph():
             END: END,
         },
     )
-    workflow.add_edge("agent1_scout", "agent2_hook_analyzer")
-    
+    # R1：agent1/agent3 之后改为条件边——系统级阻塞（缺书源/编剧失败）时
+    # 结束本次运行，而不是带着空素材继续流向下游。
+    workflow.add_conditional_edges(
+        "agent1_scout",
+        route_after_agent1,
+        {
+            "agent2_hook_analyzer": "agent2_hook_analyzer",
+            END: END,
+        },
+    )
+
     # 立项会审判定
     workflow.add_conditional_edges(
         "agent2_hook_analyzer",
@@ -229,8 +311,15 @@ def build_drama_matrix_graph():
             END: END
         }
     )
-    
-    workflow.add_edge("agent3_head_writer", "agent4_storyboard")
+
+    workflow.add_conditional_edges(
+        "agent3_head_writer",
+        route_after_agent3,
+        {
+            "agent4_storyboard": "agent4_storyboard",
+            END: END,
+        }
+    )
     
     # 分镜场记与生成流转
     workflow.add_conditional_edges(

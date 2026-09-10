@@ -18,6 +18,10 @@ class ShotStoryboard(BaseModel):
     camera: str = Field(description="机位和运镜, e.g., '特写, 静态 (Close-up, Static)'")
     visual_prompt: str = Field(description="给视频生成模型的英文提示词 (Visual Prompt for Seedance/Kling)")
     dialogue: str = Field(description="角色台词 (Dialogue)")
+    # R2：对白时间表——说话人角色名（与角色表 canonical_name 一致）。
+    # 供 Agent6 选择角色音色（DRAMAMATRIX_TTS_VOICE_MAP）与字幕归属；
+    # 旁白/无声镜头留空。旧快照恢复默认 None。
+    speaker: Optional[str] = Field(default=None, description="本镜对白说话人（角色名）；旁白/无声留空")
     duration: str = Field(description="镜头持续时间，推荐 3s ~ 5s (Duration)")
     audio: str = Field(description="音效与配乐暗示 (Audio hints)")
     # P1-A：连续性字段（全部 Optional，旧快照可平滑恢复）
@@ -54,6 +58,9 @@ class CharacterSheet(BaseModel):
     # P0-B：角色圣经补充字段
     wardrobe_id: str = Field(default="", description="服装编号，便于跨镜服化锁定")
     reference_image_prompt: str = Field(default="", description="生成该角色参考图的提示词")
+    # U2：参考图本地路径——由 character_refs.ensure_character_reference_images 生成后回填，
+    # Agent5 在场景首镜（无尾帧/场景参考时）作为条件生成输入消费。
+    reference_image_path: Optional[str] = Field(default=None, description="角色参考图本地文件路径")
     appears_in: List[str] = Field(default_factory=list, description="出场集号列表，如 ['ep_01','ep_02']")
     # R6：独立 canonical 身份字段（不再兼用 signature）
     character_id: str = Field(default="", description="稳定角色 ID，如 char_01")
@@ -66,6 +73,8 @@ class EvaluationReport(BaseModel):
     hook_analysis: str = Field(description="核心爽点、打脸、悬念分析")
     is_approved: bool = Field(description="是否通过立项")
     feedback: str = Field(description="给剧本嗅探者的退回原因或修改建议")
+    # R1：演示模式下 LLM 失败的模拟评审必须可识别，避免被当作真实评估结论。
+    simulated: bool = Field(default=False, description="是否为演示模式的模拟评审（非模型产出）")
 
 class FeedbackLog(BaseModel):
     """反馈日志记录模型"""
@@ -157,8 +166,10 @@ class EpisodeState(BaseModel):
         "awaiting_review",
         "editing_failed",
         "edit_completed",
+        "awaiting_episode_review",
         "growth_failed",
-        "growth_ready"
+        "growth_ready",
+        "analytics_done"
     ] = Field(default="pending_script")
     script_data: Optional[EpisodeScriptData] = Field(default=None)
     storyboard_data: List[ShotStoryboard] = Field(default_factory=list)
@@ -184,6 +195,12 @@ class EpisodeState(BaseModel):
     planned_shot_count: int = Field(default=0)
     # F4：成片级交付资产证据（master/配音版/字幕版/投流切片）
     deliverables: List[DeliverableAsset] = Field(default_factory=list)
+    # R1：内容来源——demo 模式的固定回退剧本必须与模型产出可区分，
+    # 防止演示内容混入正式生产链路（旧快照恢复默认 model）。
+    content_origin: Literal["model", "demo_fallback"] = Field(default="model")
+    # R2：对白时间表报告（Agent6 配音后写入）——逐句说话人/起止时间/变速/
+    # 溢出标记，供整集验收核对"台词是否被截断、字幕是否对上语音"。
+    dialogue_report: Optional[Dict[str, Any]] = Field(default=None)
 
 
 class MarketFeedback(BaseModel):

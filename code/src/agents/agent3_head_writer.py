@@ -10,6 +10,18 @@ from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import PydanticOutputParser
 
+from src.prompt_files import load_prompt
+from src.runtime_options import is_demo_mode
+
+# U5：外置到 prompts/agent3_head_writer.md；内置默认保持等价回退。
+_AGENT3_SYSTEM_TEMPLATE = """你是一个专业的爆款短剧编剧 (Report Agent)。
+你需要对传入的小说内容进行全局的【时间线分析 Timeline Analysis】。
+请将主角的核心复仇/打脸路径按照时间顺序进行规划，整部剧的总集数请控制在 **30集左右**，使节奏紧凑、绝不拖沓。
+基于这个整体规划，请为我详细拆解并输出 **前 5 到 10 集** 的具体内容。
+每个小节产出：基于时间线的具体事件核心、剧本概览、末尾悬念（必须强剧情、高悬疑）。
+
+{format_instructions}"""
+
 class TimelineEpisode(BaseModel):
     ep_id: str = Field(description="集数编号, e.g., 'ep_01'")
     chronological_event: str = Field(description="时间线发生的具体事件")
@@ -42,13 +54,10 @@ def process_agent3_head_writer(state: DramaState) -> DramaState:
     
     parser = PydanticOutputParser(pydantic_object=MasterScriptReport)
     
-    system_prompt = f"""你是一个专业的爆款短剧编剧 (Report Agent)。
-你需要对传入的小说内容进行全局的【时间线分析 Timeline Analysis】。
-请将主角的核心复仇/打脸路径按照时间顺序进行规划，整部剧的总集数请控制在 **30集左右**，使节奏紧凑、绝不拖沓。
-基于这个整体规划，请为我详细拆解并输出 **前 5 到 10 集** 的具体内容。
-每个小节产出：基于时间线的具体事件核心、剧本概览、末尾悬念（必须强剧情、高悬疑）。
-
-{parser.get_format_instructions()}"""
+    system_prompt = (
+        load_prompt("agent3_head_writer", _AGENT3_SYSTEM_TEMPLATE)
+        .replace("{format_instructions}", parser.get_format_instructions())
+    )
 
     human_prompt = f"项目名称：《{source_title}》\n来源文本：\n{raw_text[:2000]}"
 
@@ -103,19 +112,25 @@ def process_agent3_head_writer(state: DramaState) -> DramaState:
         
     except Exception as e:
         print(f"      [Report Agent] 大模型调用失败或无API key: {e}")
-        print("      使用内置回退方案生成主梗概和时间线...")
-        
-        state["master_script_outline"] = "全剧共80集。主线基于复仇和身份反转。"
-        
+        if not is_demo_mode():
+            # R1：production 模式保留失败状态（可 --resume 重试），绝不写入与原作
+            # 无关的固定剧情——否则"格式完整但故事不成立"的内容会继续进入分镜。
+            print("      ❌ production 模式：编剧失败阻塞（blocked_on_script），不使用固定回退剧情。")
+            state["system_status"] = "blocked_on_script"
+            return state
+        print("      demo 模式：使用内置回退方案生成主梗概和时间线（标记 demo_fallback）...")
+
+        state["master_script_outline"] = "【演示模式回退剧情】全剧共2集。主线基于复仇和身份反转，与源文本无关。"
+
         # fallback episodes
         ep_01_script = EpisodeScriptData(
             ep_id="ep_01",
-            outline="女主雨中被男主抛弃，绝望中被神秘豪车接走",
+            outline="【演示】女主雨中被男主抛弃，绝望中被神秘豪车接走",
             ending_hook="豪车窗户降下，竟然是男主的死对头..."
         )
         ep_02_script = EpisodeScriptData(
             ep_id="ep_02",
-            outline="豪车内，死对头递给女主一份对赌协议。女主换装重返宴会打脸男主。",
+            outline="【演示】豪车内，死对头递给女主一份对赌协议。女主换装重返宴会打脸男主。",
             ending_hook="原配男主看到焕然一新的女主，震惊地摔碎了酒杯..."
         )
         fallback_episodes = [ep_01_script, ep_02_script]
@@ -124,9 +139,9 @@ def process_agent3_head_writer(state: DramaState) -> DramaState:
             fallback_episodes = fallback_episodes[:max_episodes]
         for fallback in fallback_episodes:
             state["episodes"][fallback.ep_id] = EpisodeState(
-                status="script_done", script_data=fallback
+                status="script_done", script_data=fallback, content_origin="demo_fallback"
             )
-        print("✅ 使用内建兜底方案生成了全剧拆解与前两集大纲。")
+        print("✅ demo 模式：使用内建兜底方案生成了全剧拆解与前两集大纲（content_origin=demo_fallback）。")
 
     state["system_status"] = "ready_for_storyboard"
     # P0-B：从总纲/各集大纲/原文多源生成角色圣经，供分镜与视频生成沿用。

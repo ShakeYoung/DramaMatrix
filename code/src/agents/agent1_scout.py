@@ -5,6 +5,7 @@ import requests
 from bs4 import BeautifulSoup
 from src.state import DramaState
 from src.db import db_insert_novel, db_get_unprocessed_novel, db_mark_novel_processed
+from src.runtime_options import is_demo_mode
 
 def scrape_biquge_novel(exclude_titles=None) -> dict:
     """
@@ -77,16 +78,42 @@ def process_agent1_scout(state: DramaState) -> DramaState:
             "content": db_novel['content']
         }
     else:
-        print("未在数据库找到合适数据，启动 Query Agent (Web Search) 爬虫抓取新小说...")
-        # Step 2: Query Agent - Web Scraper（换书重试时排除已尝试/已否决的书目）
+        print("未在数据库找到合适的数据，启动 Query Agent 获取新小说...")
+        # Step 2: Query Agent —— W2：优先本地小说库（运营自备 txt，合规真实源），
+        # 未配置时回退 mock 爬虫（受控试制/测试）。
         excluded = set(state.get("meta_info", {}).get("scout_excluded", []) or [])
-        new_novel = scrape_biquge_novel(exclude_titles=sorted(excluded))
+        new_novel = None
+        local_library_error: Exception | None = None
+        try:
+            from src.local_sources import load_local_novel
+
+            new_novel = load_local_novel(exclude_titles=excluded)
+            if new_novel:
+                print(f"-> [LocalLibrary] 从本地小说库选取: 《{new_novel['title']}》")
+        except Exception as exc:  # noqa: BLE001
+            local_library_error = exc
+        if new_novel is None:
+            if is_demo_mode():
+                # demo 模式保留 mock 爬虫回退（演示/测试用）。
+                if local_library_error is not None:
+                    print(f"   ⚠️ 本地小说库读取失败，demo 模式回退 mock 爬虫：{local_library_error}")
+                new_novel = scrape_biquge_novel(exclude_titles=sorted(excluded))
+            else:
+                # R1：production 模式缺真实书源一律阻塞——mock 书目会让"无数据"
+                # 伪装成"已选品成功"，后续整条链路都建立在演示内容上。
+                print("❌ production 模式缺少真实书源，选品阻塞（blocked_on_source）。")
+                if local_library_error is not None:
+                    print(f"   本地小说库读取失败：{local_library_error}")
+                print("   → 配置 DRAMAMATRIX_LOCAL_NOVEL_DIR（目录内 *.txt，文件名即书名）后 --resume；")
+                print("   → 演示用途请显式设置 DRAMAMATRIX_RUN_MODE=demo。")
+                state["system_status"] = "blocked_on_source"
+                return state
         if new_novel:
             # Step 3: Insight Agent - Save to Database
             success = db_insert_novel(
-                title=new_novel['title'], 
-                url='https://mock.biquge.com/novel/1', 
-                tags=json.dumps(new_novel['tags'], ensure_ascii=False), 
+                title=new_novel['title'],
+                url=new_novel.get('url') or 'https://mock.biquge.com/novel/1',
+                tags=json.dumps(new_novel['tags'], ensure_ascii=False),
                 content=new_novel['content']
             )
             if success:
@@ -108,6 +135,13 @@ def process_agent1_scout(state: DramaState) -> DramaState:
     # 写入 Global State
     state["meta_info"]["source_title"] = selected_novel["title"]
     state["meta_info"]["genre_tags"] = selected_novel["tags"]
+    # W3：源头素材权属声明落库（幂等），投放包出工作室前可追溯。
+    try:
+        from src.rights import record_source_rights
+
+        record_source_rights(state["project_id"], selected_novel["title"])
+    except Exception as exc:  # noqa: BLE001 - 权属落库失败不阻断选品
+        print(f"   ⚠️ 权属声明落库失败：{exc}")
     excluded = set(state["meta_info"].get("scout_excluded", []) or [])
     excluded.add(selected_novel["title"])
     state["meta_info"]["scout_excluded"] = sorted(excluded)

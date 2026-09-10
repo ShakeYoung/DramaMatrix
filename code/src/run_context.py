@@ -18,6 +18,8 @@ from uuid import uuid4
 
 # Whitelist of non-sensitive env vars to snapshot (NO keys/tokens/secrets).
 _CONFIG_ENV_WHITELIST = [
+    "DRAMAMATRIX_RUN_MODE",
+    "DRAMAMATRIX_AUTO_NEXT_CYCLE",
     "DRAMAMATRIX_MAX_CYCLES",
     "DRAMAMATRIX_MAX_SCOUT_ATTEMPTS",
     "DRAMAMATRIX_CONDITIONAL_GENERATION",

@@ -10,9 +10,34 @@ import os
 from typing import Sequence
 
 
+VALID_RUN_MODES = ("production", "demo")
+
+
+def run_mode() -> str:
+    """运行模式：production（默认，模拟回退一律阻塞）/ demo（显式演示，回退可用且带标记）。
+
+    非法值直接抛错（fail fast），与 VIDEO_PROVIDER 未知值报错的先例一致。
+    """
+    value = os.getenv("DRAMAMATRIX_RUN_MODE", "production").strip().lower()
+    if value not in VALID_RUN_MODES:
+        raise ValueError(
+            f"DRAMAMATRIX_RUN_MODE 非法：{value!r}（可选：{'/'.join(VALID_RUN_MODES)}）"
+        )
+    return value
+
+
+def is_demo_mode() -> bool:
+    return run_mode() == "demo"
+
+
 def parse_runtime_options(argv: Sequence[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="Run or resume a DramaMatrix production project.")
     parser.add_argument("--project-id", help="项目 ID；相同 ID 才能恢复同一份 SQLite 快照。")
+    parser.add_argument(
+        "--run-mode",
+        choices=VALID_RUN_MODES,
+        help="本次运行模式（默认读取 DRAMAMATRIX_RUN_MODE 或 production）。",
+    )
     parser.add_argument(
         "--resume",
         action=argparse.BooleanOptionalAction,
@@ -40,6 +65,7 @@ def parse_runtime_options(argv: Sequence[str] | None = None) -> argparse.Namespa
 def apply_runtime_options(options: argparse.Namespace) -> None:
     overrides = {
         "DRAMAMATRIX_PROJECT_ID": options.project_id,
+        "DRAMAMATRIX_RUN_MODE": options.run_mode,
         "DRAMAMATRIX_RESUME": None if options.resume is None else ("1" if options.resume else "0"),
         "AGNES_GET_RETRY_ATTEMPTS": (
             None if options.agnes_get_retry_attempts is None else str(options.agnes_get_retry_attempts)

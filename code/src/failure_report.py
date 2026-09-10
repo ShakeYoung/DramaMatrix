@@ -23,8 +23,18 @@ _DISPOSITION = {
     "storyboard_blocked": "修正分镜（数量/生成失败）后重置状态",
     "awaiting_review": "后台模式：完成 review.json 决策后用同一项目续跑；前台可使用 interactive 模式",
     "director_rejected": "分镜需重写，检查 QC/内容策略反馈",
-    "editing_failed": "检查 ffmpeg/素材完整性",
-    "growth_failed": "检查投流切片导出相关 ffmpeg/路径",
+    "editing_failed": "检查 ffmpeg/素材完整性后 --resume（已支持从 Agent 6 断点重试）",
+    "growth_failed": "检查投流切片导出相关 ffmpeg/路径/交付包完整性后 --resume（已支持从 Agent 7 断点重试）",
+    "awaiting_episode_review": "整集验收：核对 episode_review.json（对白完整性/字幕对齐/溢出标记）后 python -m src.episode_review <project> <ep> approve|rework",
+}
+
+# R1：系统级阻塞（无 episode 级状态）的修复指引。
+_SYSTEM_DISPOSITION = {
+    "blocked_on_source": "production 模式缺少真实书源：配置 DRAMAMATRIX_LOCAL_NOVEL_DIR 后 --resume；演示用途设 DRAMAMATRIX_RUN_MODE=demo",
+    "blocked_on_text_model": "评审模型调用失败：配置文本模型密钥（OPENAI_API_KEY 或 TEXT_MODEL_*）后 --resume",
+    "blocked_on_script": "编剧模型调用失败：配置文本模型密钥后 --resume（production 模式不使用固定回退剧情）",
+    "waiting_for_market_data": "等待真实投放数据：配置 DRAMAMATRIX_ANALYTICS_IMPORT（平台导出 CSV/JSON）后 --resume；演示用途设 DRAMAMATRIX_RUN_MODE=demo",
+    "waiting_for_episode_review": "整集验收等待人工核片：查看 episode_review.json 后 python -m src.episode_review <project> <ep> approve|rework",
 }
 
 
@@ -55,13 +65,23 @@ def build_failure_report(state: dict[str, Any]) -> dict[str, Any]:
             if fb.reason_code in {"QC_REDRAW", "AGNES_RENDER_FAILED", "GROWTH_EXPORT_FAILED", "FFMPEG_EDIT_FAILED"}:
                 entry["blocked_shots"].append({"reason": fb.message})
         report["blocked_episodes"].append(entry)
+    # R1：blocked_on_source/blocked_on_text_model/blocked_on_script/
+    # waiting_for_market_data 等系统级阻塞没有 episode 级状态，单独记录。
+    system_status = state.get("system_status", "") or ""
+    if not report["blocked_episodes"] and system_status.startswith(("blocked_", "waiting_", "failed")):
+        report["system_block"] = {
+            "status": system_status,
+            "disposition": _SYSTEM_DISPOSITION.get(
+                system_status, "检查运行配置/密钥后 --resume，或查阅运行日志定位"
+            ),
+        }
     return report
 
 
 def write_failure_report(state: dict[str, Any], output_dir: Path | None = None) -> Path | None:
     """Write failure_report.json next to the project output; return its path."""
     report = build_failure_report(state)
-    if not report["blocked_episodes"]:
+    if not report["blocked_episodes"] and not report.get("system_block"):
         return None
     project_id = state.get("project_id")
     base = output_dir or (episode_output_dir(project_id, "report") if project_id else Path.cwd())
