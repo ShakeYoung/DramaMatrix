@@ -216,6 +216,18 @@ def route_next_step_for_episode(state: DramaState) -> str:
     episodes = list(state.get("episodes", {}).values())
     if not episodes:
         return END
+    # R1 修复（agent4-7 段守卫）：系统级阻塞/等待必须结束本次运行——否则
+    # 例如角色圣经为空时 Agent5 早退不改集状态（仍 storyboard_done），
+    # 路由只看集状态会把 Agent5 无限重入直至 GraphRecursionError。
+    # 例外：blocked_on_storyboard_revision 是 director_rejected → Agent4 的
+    # 有意重写循环，交由下方分支处理。
+    status = state.get("system_status", "") or ""
+    if (
+        status.startswith(("blocked_", "waiting_"))
+        and status != "blocked_on_storyboard_revision"
+    ):
+        print(f">> Router: 系统阻塞/等待状态 {status}，本次运行结束（修复配置后 --resume）。")
+        return END
     if any(ep.status == "director_rejected" for ep in episodes):
         print(">> Router: 检测到 Agnes 渲染反馈，重新路由至 Agent 4")
         return "agent4_storyboard"

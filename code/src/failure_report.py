@@ -33,6 +33,7 @@ _SYSTEM_DISPOSITION = {
     "blocked_on_source": "production 模式缺少真实书源：配置 DRAMAMATRIX_LOCAL_NOVEL_DIR 后 --resume；演示用途设 DRAMAMATRIX_RUN_MODE=demo",
     "blocked_on_text_model": "评审模型调用失败：配置文本模型密钥（OPENAI_API_KEY 或 TEXT_MODEL_*）后 --resume",
     "blocked_on_script": "编剧模型调用失败：配置文本模型密钥后 --resume（production 模式不使用固定回退剧情）",
+    "blocked_on_missing_character_bible": "角色圣经为空：检查文本模型与 Agent3 角色抽取；确认可接受无一致性约束后设 DRAMAMATRIX_ALLOW_NO_CHARACTERS=1（demo 模式自动放行）",
     "waiting_for_market_data": "等待真实投放数据：配置 DRAMAMATRIX_ANALYTICS_IMPORT（平台导出 CSV/JSON）后 --resume；演示用途设 DRAMAMATRIX_RUN_MODE=demo",
     "waiting_for_episode_review": "整集验收等待人工核片：查看 episode_review.json 后 python -m src.episode_review <project> <ep> approve|rework",
 }

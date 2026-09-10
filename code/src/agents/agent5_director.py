@@ -11,6 +11,7 @@ from pathlib import Path
 import requests.exceptions as requests_exceptions
 
 from src.cost_tracker import CostTracker
+from src.runtime_options import is_demo_mode
 from src.model_providers import (
     AgnesProvider,
     RenderProfile,
@@ -734,12 +735,19 @@ def process_agent5_director(state: DramaState) -> DramaState:
         print("❌ 检测到结果未知的历史提交，已熔断所有新任务；请先在 Agnes 控制台核对。")
         return state
     # P0-B 门禁：角色圣经为空时禁止正式渲染，避免无一致性约束的盲渲染。
-    allow_no_characters = os.getenv("DRAMAMATRIX_ALLOW_NO_CHARACTERS", "0").strip().lower() in {"1", "true", "yes"}
+    # R1：demo 模式按语义自动放行（演示链路常因文本模型不可用而抽取不到
+    # 角色）；production 保持硬拦，需显式 DRAMAMATRIX_ALLOW_NO_CHARACTERS=1。
+    allow_no_characters = (
+        os.getenv("DRAMAMATRIX_ALLOW_NO_CHARACTERS", "0").strip().lower() in {"1", "true", "yes"}
+        or is_demo_mode()
+    )
     if not state.get("characters") and not allow_no_characters:
         state["system_status"] = "blocked_on_missing_character_bible"
         print("❌ 角色圣经为空，已禁止渲染。请确认 Agent 3 已生成角色圣经，")
         print("   或设置 DRAMAMATRIX_ALLOW_NO_CHARACTERS=1 强制放行（不推荐，将丧失角色一致性）。")
         return state
+    if not state.get("characters") and is_demo_mode():
+        print("⚠️ demo 模式：角色圣经为空，自动放行渲染（仅演示，无角色一致性约束）。")
     now = time.time()
     # 容量/连通性属于当前 Agnes 账户的全局背压。只要任一剧集仍在退避窗口，
     # 就不能跳过它而提交后续剧集，否则会继续冲击已经饱和的队列。

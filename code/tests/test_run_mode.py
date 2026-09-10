@@ -12,7 +12,7 @@ from unittest.mock import patch
 
 import src.db as db_module
 from src.runtime_options import is_demo_mode, run_mode
-from src.state import EpisodeState
+from src.state import EpisodeScriptData, EpisodeState, ShotStoryboard
 
 
 def base_state(project_id="mode_p"):
@@ -141,6 +141,47 @@ class Agent3ModeTests(unittest.TestCase):
             len(state["episodes"]),
             int(state["master_script_outline"].split("共")[1].split("集")[0]),
         )
+
+
+class Agent5CharacterGateTests(unittest.TestCase):
+    """R1：demo 模式自动放行空角色圣经；production 保持 P0-B 硬拦。"""
+
+    def _run(self, mode):
+        from src.agents.agent5_director import process_agent5_director
+        from src.state import ShotStoryboard
+
+        state = base_state("mode_a5")
+        state["episodes"] = {
+            "ep_01": EpisodeState(
+                status="storyboard_done",
+                script_data=EpisodeScriptData(ep_id="ep_01", outline="o", ending_hook="h"),
+                storyboard_data=[ShotStoryboard(
+                    shot_id="s01", camera="Static", visual_prompt="v",
+                    dialogue="d", duration="4s", audio="a",
+                )],
+            )
+        }
+        with patch.dict(os.environ, {
+            "DRAMAMATRIX_RUN_MODE": mode,
+            "DRAMAMATRIX_VIDEO_PROVIDER": "dummy",
+            "DRAMAMATRIX_IMAGE_PROVIDER": "off",
+            "DRAMAMATRIX_REVIEW_MODE": "0",
+            "DRAMAMATRIX_ALLOW_NO_CHARACTERS": "0",
+            "DRAMAMATRIX_EPISODE_REVIEW": "0",
+        }, clear=False), patch("src.agents.agent5_director.db_save_project_state"):
+            process_agent5_director(state)
+        return state
+
+    def test_demo_mode_allows_empty_character_bible(self):
+        state = self._run("demo")
+        self.assertNotEqual(
+            state["system_status"], "blocked_on_missing_character_bible",
+            "demo 模式空角色圣经应自动放行（无一致性约束的演示渲染）",
+        )
+
+    def test_production_mode_blocks_empty_character_bible(self):
+        state = self._run("production")
+        self.assertEqual(state["system_status"], "blocked_on_missing_character_bible")
 
 
 class Agent8ModeTests(unittest.TestCase):

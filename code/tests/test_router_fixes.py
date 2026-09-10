@@ -90,6 +90,40 @@ class SystemBlockGuardTests(unittest.TestCase):
         ):
             self.assertEqual(route_after_cycles(state), END)
 
+    def test_system_block_ends_midrun_routing_instead_of_agent5_loop(self):
+        """回归（集群实测）：Agent5 早退且集状态仍 storyboard_done 时，
+        route_next_step_for_episode 只看集状态会把 Agent5 无限重入直至
+        GraphRecursionError——系统级 blocked_/waiting_ 必须结束本次运行。
+        """
+        from src.graph import route_next_step_for_episode
+
+        for blocked_status in (
+            "blocked_on_missing_character_bible",
+            "blocked_on_agnes_configuration",
+            "waiting_for_episode_review",
+        ):
+            state = state_with("storyboard_done")
+            state["system_status"] = blocked_status
+            self.assertEqual(
+                route_next_step_for_episode(state), END,
+                f"{blocked_status} 应结束本次运行而非重入 Agent5",
+            )
+
+    def test_storyboard_revision_loop_not_cut_by_system_guard(self):
+        """director_rejected → Agent4 的重写循环是有意的，守卫不得拦截。"""
+        from src.graph import route_next_step_for_episode
+
+        state = state_with("director_rejected")
+        state["system_status"] = "blocked_on_storyboard_revision"
+        self.assertEqual(route_next_step_for_episode(state), "agent4_storyboard")
+
+    def test_healthy_system_status_still_routes_storyboard_done(self):
+        from src.graph import route_next_step_for_episode
+
+        state = state_with("storyboard_done")
+        state["system_status"] = "ready_for_storyboard"
+        self.assertEqual(route_next_step_for_episode(state), "agent5_director")
+
 
 class FailureReportSystemBlockTests(unittest.TestCase):
     def test_system_level_block_is_reported_without_episode_states(self):
