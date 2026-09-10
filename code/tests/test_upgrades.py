@@ -176,6 +176,47 @@ class ProviderWiringTests(IsolatedEnv):
         self.assertEqual(profile.model, settings.model)
 
 
+class DummyProviderRealClipTests(IsolatedEnv):
+    """修复回归：装有 ffprobe 的机器（CI/集群）上 dummy 产物必须真实可探测。
+
+    旧实现写字面量假字节，被 P0-3 无效视频硬门禁判损坏（director_rejected），
+    离线演示与 test_dummy_provider_end_to_end 在 ffmpeg 环境全部失败。
+    """
+
+    def setUp(self):
+        super().setUp()
+        os.environ["DRAMAMATRIX_VIDEO_PROVIDER"] = "dummy"
+
+    def test_download_generates_real_clip_when_ffmpeg_available(self):
+        from src.model_providers import DummyProvider
+
+        def fake_ffmpeg(command, **kwargs):
+            # 模拟 ffmpeg 成功产出：命令的最后一个参数是目标文件。
+            destination = Path(command[-1])
+            destination.write_bytes(b"\x00\x00\x00\x18ftypisom")
+            class _Result:
+                returncode = 0
+            return _Result()
+
+        with patch("shutil.which", return_value="/usr/bin/ffmpeg"), patch(
+            "subprocess.run", side_effect=fake_ffmpeg
+        ) as run:
+            destination = DummyProvider().download("http://dummy/v.mp4", self.tmp / "shot.mp4")
+        content = destination.read_bytes()
+        self.assertNotEqual(content, b"dummy-video", "有 ffmpeg 时必须产出真实视频而非占位字节")
+        command = run.call_args_list[0][0][0]
+        self.assertIn("lavfi", command)
+        self.assertIn("color=", " ".join(command))
+        self.assertIn("-c:v", command)
+
+    def test_download_falls_back_to_placeholder_without_ffmpeg(self):
+        from src.model_providers import DummyProvider
+
+        with patch("shutil.which", return_value=None):
+            destination = DummyProvider().download("http://dummy/v.mp4", self.tmp / "shot2.mp4")
+        self.assertEqual(destination.read_bytes(), b"dummy-video")
+
+
 # ----------------------------- U3：视觉相似度 QC -----------------------------
 
 class VisualSimilarityTests(IsolatedEnv):

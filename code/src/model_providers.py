@@ -149,6 +149,12 @@ class DummyProvider(VideoProvider):
 
     def download(self, remote_url: str, destination: Path) -> Path:
         destination.parent.mkdir(parents=True, exist_ok=True)
+        # 修复：字面量假字节在装有 ffprobe 的机器上会被 P0-3 无效视频硬门禁
+        # 正确拒绝（无视频流/时长为 0 → director_rejected）——dummy 在此类
+        # 环境（含 CI 与集群）必须产出"真实可探测"的最小视频。
+        if _write_minimal_clip(destination):
+            return destination
+        # 无 ffmpeg 环境：退回字节占位（media_integrity 无法探测 → 宽放）。
         destination.write_bytes(b"dummy-video")
         return destination
 
@@ -165,6 +171,40 @@ class DummyProvider(VideoProvider):
 
 def configured_provider_name() -> str:
     return os.getenv("DRAMAMATRIX_VIDEO_PROVIDER", "agnes").strip().lower()
+
+
+def _write_minimal_clip(destination: Path, duration_seconds: float = 1.0) -> bool:
+    """生成一个真实可探测的最小黑场视频（有 ffmpeg 时），供 DummyProvider 使用。
+
+    P0-3 硬门禁用 ffprobe 校验下载产物：假字节会被判损坏。这里用 lavfi
+    生成 1 秒 720x1280 黑场（yuv420p，兼容拼接/抽帧），优先 libx264，
+    精简构建缺失时回退 mpeg4；任何失败返回 False 由调用方退回占位字节。
+    """
+    import shutil
+    import subprocess
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return False
+    profile_w = _env_int("AGNES_VIDEO_WIDTH", 720)
+    profile_h = _env_int("AGNES_VIDEO_HEIGHT", 1280)
+    source = (
+        f"color=c=black:s={profile_w}x{profile_h}:r=24:d={duration_seconds:.2f}"
+    )
+    for codec in ("libx264", "mpeg4"):
+        command = [
+            ffmpeg, "-y", "-f", "lavfi", "-i", source,
+            "-pix_fmt", "yuv420p", "-c:v", codec,
+            "-movflags", "+faststart",
+            str(destination),
+        ]
+        try:
+            subprocess.run(command, check=True, capture_output=True, text=True)
+        except (subprocess.CalledProcessError, OSError):
+            continue
+        if destination.is_file() and destination.stat().st_size > 0:
+            return True
+    return False
 
 
 def get_video_provider() -> VideoProvider:
