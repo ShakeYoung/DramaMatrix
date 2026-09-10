@@ -14,6 +14,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Install ffmpeg (real-media integration tests, W6)
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends ffmpeg
+
       - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
@@ -24,9 +29,10 @@ jobs:
           pip install -r requirements.txt
           pip install pytest
 
-      - name: Run tests (media/ffmpeg via mocks)
+      - name: Run tests (mocked unit tests + real-media integration tests)
         run: python -m pytest tests/ -q
         env:
-          # No ffmpeg / no real Agnes keys needed - media calls are mocked.
+          # No real Agnes/LLM keys needed - API calls are mocked;
+          # ffmpeg is present so test_real_media.py runs for real.
           DRAMAMATRIX_TTS_ENABLED: "1"
           DRAMAMATRIX_SUBTITLES_ENABLED: "1"

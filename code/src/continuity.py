@@ -247,21 +247,46 @@ def prepare_shot_reference(
     shot: ShotStoryboard,
     scene_references: dict[str, str],
     previous_last_frame: Optional[str],
+    character_references: Optional[dict[str, str]] = None,
 ) -> dict[str, Optional[str]]:
-    """Decide the conditional inputs for a shot (P1-C).
+    """Decide the conditional inputs for a shot (P1-C / U2).
 
-    - First shot of a scene: use the scene's fixed reference image (image_url).
-    - Subsequent shot in the same scene: use the previous shot's last frame
+    - Same-scene subsequent shot: use the previous shot's last frame
       (image_url pointing at the extracted frame) so identity/wardrobe carry over.
-    Returns {'image_url': ..., 'last_frame_url': ...} (any may be None).
+    - First shot of a scene: use the scene's fixed reference image (image_url).
+    - U2：场景首镜若无场景参考，则从 visual_prompt/dialogue 命中角色名，
+      使用该角色的参考图（character_refs 生成的本地文件），约束身份/服化。
+
+    Returns {'image_url': ..., 'last_frame_url': ..., 'source': 'tail'|'scene'|'character'|None,
+             'ref_id': ...}（image_url/last_frame_url 可为 None；新增键向后兼容）。
     """
-    result = {"image_url": None, "last_frame_url": None}
+    result: dict[str, Optional[str]] = {
+        "image_url": None,
+        "last_frame_url": None,
+        "source": None,
+        "ref_id": None,
+    }
     scene_id = shot.scene_id
     if previous_last_frame:
         # Chain from the previous shot's tail frame.
         result["image_url"] = previous_last_frame
-    elif scene_id and scene_id in scene_references:
+        result["source"] = "tail"
+        result["ref_id"] = scene_id or "tail"
+        return result
+    if scene_id and scene_id in scene_references:
         result["image_url"] = scene_references[scene_id]
+        result["source"] = "scene"
+        result["ref_id"] = scene_id
+        return result
+    if character_references:
+        text = f"{shot.visual_prompt or ''}\n{shot.dialogue or ''}"
+        # 长名优先：避免"萧寒"先于"小萧寒"命中造成误归属。
+        for name in sorted(character_references, key=len, reverse=True):
+            if name and name in text:
+                result["image_url"] = character_references[name]
+                result["source"] = "character"
+                result["ref_id"] = name
+                break
     return result
 
 

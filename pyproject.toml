@@ -1,0 +1,39 @@
+[project]
+name = "dramamatrix"
+version = "0.2.0"
+description = "AI 短剧自动化生产流水线：选品→立项→编剧→分镜→生成→剪辑→切片→回流的 LangGraph 多 Agent 工作台"
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "Proprietary" }
+dependencies = [
+  "beautifulsoup4>=4.12,<5.0",
+  "langchain-openai>=0.3,<1.0",
+  "langgraph>=0.2,<1.0",
+  "pydantic>=2.10,<3.0",
+  "python-dotenv>=1.0,<2.0",
+  "requests>=2.32,<3.0",
+  "edge-tts>=6.1,<7.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+# 运行仍需系统 ffmpeg/ffprobe（拼接/抽帧/字幕/QC）；见 README「环境准备」。
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+package-dir = { "" = "code" }
+
+[tool.setuptools.packages.find]
+where = ["code"]
+include = ["src*"]
+
+[tool.setuptools.package-data]
+src = ["prompts/*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["code/tests"]
+pythonpath = ["code"]

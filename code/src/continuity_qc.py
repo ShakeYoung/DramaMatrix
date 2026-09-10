@@ -29,7 +29,7 @@ class ContinuityResult:
 
 
 class ContinuityChecker(Protocol):
-    """Pluggable per-shot continuity check (P2-A / R3)."""
+    """Pluggable per-shot continuity check (P2-A / R3 / W4)."""
 
     def check(
         self,
@@ -38,6 +38,7 @@ class ContinuityChecker(Protocol):
         curr_video: Path,
         shot: ShotStoryboard,
         curr_first_frame: Optional[Path] = None,
+        reference_frame: Optional[Path] = None,
     ) -> ContinuityResult: ...
 
 
@@ -92,6 +93,74 @@ def _brightness_threshold() -> float:
     return float(__import__("os").getenv("DRAMAMATRIX_QC_BRIGHTNESS_THRESHOLD", "45"))
 
 
+# ---------------- U3：结构级视觉相似度（dHash 感知哈希） ----------------
+# 亮度差只能发现曝光跳变；dHash 捕捉空间梯度结构，能进一步发现构图/主体
+# 漂移（如角色突然消失、机位错位）。经 ffmpeg 解码为 size×size 灰度图后
+# 纯 Python 计算位哈希，不引入重依赖（CLIP/InsightFace 仍可作为可插拔
+# 实现替换整个 checker）。默认只告警不拦截；DRAMAMATRIX_QC_SIMILARITY_GATE=1
+# 开启硬门禁（低于阈值判不合格走重绘）。
+
+_HASH_SIZE = 16
+_HASH_BITS = _HASH_SIZE * (_HASH_SIZE - 1)
+
+
+def _frame_gray_bytes(image: Path, size: int = _HASH_SIZE) -> Optional[bytes]:
+    """Decode a still frame into a size×size grayscale bitmap via ffmpeg rawvideo."""
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg or not image.is_file():
+        return None
+    try:
+        result = subprocess.run(
+            [
+                ffmpeg, "-hide_banner", "-loglevel", "error",
+                "-i", str(image),
+                "-vf", f"scale={size}:{size}",
+                "-f", "rawvideo", "-pix_fmt", "gray", "-",
+            ],
+            check=False, capture_output=True,
+        )
+    except (subprocess.SubprocessError, OSError):
+        return None
+    data = result.stdout
+    return data if len(data) >= size * size else None
+
+
+def perceptual_hash(gray: bytes, size: int = _HASH_SIZE) -> int:
+    """dHash：逐行比较相邻像素亮度（左>右 置位），输出 size*(size-1) 位整数。"""
+    bits = 0
+    for row in range(size):
+        base = row * size
+        for col in range(size - 1):
+            bits <<= 1
+            if gray[base + col] > gray[base + col + 1]:
+                bits |= 1
+    return bits
+
+
+def hash_bit_count() -> int:
+    return _HASH_BITS
+
+
+def frame_similarity(frame_a: Path, frame_b: Path) -> Optional[float]:
+    """Structural similarity in [0,1] between two still frames (1 = identical)."""
+    gray_a = _frame_gray_bytes(frame_a)
+    gray_b = _frame_gray_bytes(frame_b)
+    if gray_a is None or gray_b is None:
+        return None
+    distance = bin(perceptual_hash(gray_a) ^ perceptual_hash(gray_b)).count("1")
+    return 1.0 - distance / _HASH_BITS
+
+
+def _similarity_threshold() -> float:
+    import os
+    return float(os.getenv("DRAMAMATRIX_QC_SIMILARITY_THRESHOLD", "0.55"))
+
+
+def _similarity_gate_enabled() -> bool:
+    import os
+    return os.getenv("DRAMAMATRIX_QC_SIMILARITY_GATE", "0").strip().lower() in {"1", "true", "yes", "on"}
+
+
 class DefaultChecker:
     """Lightweight continuity checker (P2-A).
 
@@ -111,6 +180,7 @@ class DefaultChecker:
         curr_video: Path,
         shot: ShotStoryboard,
         curr_first_frame: Optional[Path] = None,
+        reference_frame: Optional[Path] = None,
     ) -> ContinuityResult:
         issues: list[str] = []
         metrics: dict[str, float] = {}
@@ -121,6 +191,12 @@ class DefaultChecker:
             issues.append(f"当前镜头文件为空: {curr_video}")
             return ContinuityResult(passed=False, issues=issues, metrics=metrics)
         if not _ffmpeg_available():
+            # W4：像素级检查不可用不挡身份质检——判官走多模态 API，不依赖本地 ffmpeg。
+            gate_failed, identity_issue = self._identity_check(reference_frame, curr_first_frame, metrics)
+            if identity_issue:
+                issues.append(identity_issue)
+            if gate_failed:
+                return ContinuityResult(passed=False, issues=issues, metrics=metrics)
             # Graceful degradation: cannot run real checks → pass with a note.
             issues.append("无 ffmpeg，跳过像素级连续性检查（建议服务器端启用）。")
             return ContinuityResult(passed=not self.strict, issues=issues, metrics=metrics)
@@ -139,11 +215,62 @@ class DefaultChecker:
             if diff is not None and diff > threshold:
                 issues.append(f"上一镜尾帧与当前镜首帧亮度差异过大（{diff:.2f}），可能存在跳变。")
                 return ContinuityResult(passed=False, issues=issues, metrics=metrics)
+            # U3：结构级相似度（dHash）。默认告警；开 GATE 后作为硬门禁。
+            similarity = frame_similarity(prev_last_frame, curr_first_frame)
+            if similarity is not None:
+                similarity_threshold = _similarity_threshold()
+                metrics["frame_similarity"] = similarity
+                metrics["similarity_threshold"] = similarity_threshold
+                if similarity < similarity_threshold:
+                    message = (
+                        f"上一镜尾帧与当前镜首帧结构相似度过低（{similarity:.3f} < "
+                        f"{similarity_threshold:.3f}），可能存在画面跳变或角色/场景漂移。"
+                    )
+                    if _similarity_gate_enabled():
+                        issues.append(message)
+                        return ContinuityResult(passed=False, issues=issues, metrics=metrics)
+                    issues.append(f"告警：{message}")
         elif prev_last_frame and not curr_first_frame:
             issues.append("当前镜首帧提取失败，无法执行跨镜质检。")
             if self.strict:
                 return ContinuityResult(passed=False, issues=issues, metrics=metrics)
+        # W4：角色身份一致性（Vision-LLM 判官，参考图 vs 当前首帧）。
+        if reference_frame and curr_first_frame:
+            gate_failed, identity_issue = self._identity_check(reference_frame, curr_first_frame, metrics)
+            if identity_issue:
+                issues.append(identity_issue)
+            if gate_failed:
+                return ContinuityResult(passed=False, issues=issues, metrics=metrics)
         return ContinuityResult(passed=True, issues=issues, metrics=metrics)
+
+    def _identity_check(
+        self, reference_frame: Optional[Path], curr_first_frame: Optional[Path],
+        metrics: dict[str, float],
+    ) -> tuple[bool, Optional[str]]:
+        """身份质检（W4）。Returns (gate_failed, issue_text)。
+
+        issue_text 为 None 表示跳过（未启用/判官失败/达标）；否则是需要写入
+        issues 的告警或拦截文案，gate_failed=True 时该文案即为拦截原因。
+        """
+        if not reference_frame or not curr_first_frame:
+            return False, None
+        from src.identity_qc import identity_gate_enabled, identity_threshold, judge_identity
+
+        verdict = judge_identity(reference_frame, curr_first_frame)
+        if verdict is None:
+            return False, None
+        threshold = identity_threshold()
+        metrics["identity_score"] = verdict["score"]
+        metrics["identity_threshold"] = threshold
+        if verdict["score"] >= threshold:
+            return False, None
+        message = (
+            f"角色身份一致性低于阈值（{verdict['score']:.0f} < {threshold:.0f}）："
+            f"{verdict['reasons']}"
+        )
+        if identity_gate_enabled():
+            return True, message
+        return False, f"告警：{message}"
 
 
 def get_checker() -> ContinuityChecker:

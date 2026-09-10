@@ -13,7 +13,17 @@ from typing import Any, Sequence
 
 from pydantic import BaseModel
 
+from src.prompt_files import load_prompt
 from src.state import CharacterSheet
+
+# U5：外置到 prompts/character_bible.md；内置默认保持等价回退。
+_CHARACTER_BIBLE_TEMPLATE = (
+    "你是短剧角色圣经编剧。请从给定的总纲、各集大纲与原文中，提取全部主要角色，"
+    "为每个角色给出稳定的姓名、外形/服化描述、服装编号(wardrobe_id)、角色定位、"
+    "出场集号(appears_in)与参考图生成提示词(reference_image_prompt)。"
+    "外形描述要具体到发型/服饰/配饰/年龄段，保证跨镜一致。\n"
+    "{format_instructions}"
+)
 
 
 def extract_characters(text: str, fallback: Sequence[CharacterSheet] | None = None) -> list[CharacterSheet]:
@@ -143,14 +153,12 @@ def build_character_bible(
         from src.text_model import create_text_model
         from langchain_core.messages import HumanMessage, SystemMessage
         from langchain_core.output_parsers import PydanticOutputParser
+        from src.prompt_files import load_prompt
 
         parser = PydanticOutputParser(pydantic_object=CharacterBible)
         system = (
-            "你是短剧角色圣经编剧。请从给定的总纲、各集大纲与原文中，提取全部主要角色，"
-            "为每个角色给出稳定的姓名、外形/服化描述、服装编号(wardrobe_id)、角色定位、"
-            "出场集号(appears_in)与参考图生成提示词(reference_image_prompt)。"
-            "外形描述要具体到发型/服饰/配饰/年龄段，保证跨镜一致。\n"
-            + parser.get_format_instructions()
+            load_prompt("character_bible", _CHARACTER_BIBLE_TEMPLATE)
+            .replace("{format_instructions}", parser.get_format_instructions())
         )
         llm = create_text_model(temperature=0.3)
         response = llm.invoke([SystemMessage(content=system), HumanMessage(content=context)])

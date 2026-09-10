@@ -1,0 +1,13 @@
+# 不打入镜像的内容：密钥、产物数据库、输出与虚拟环境。
+.env
+code/.env
+**/.env
+code/dramamatrix.db
+code/outputs/
+code/nohup.out
+**/__pycache__/
+**/*.pyc
+.git/
+.venv/
+venv/
+.zcode/
