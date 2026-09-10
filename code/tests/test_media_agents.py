@@ -50,6 +50,8 @@ class MediaAgentTests(unittest.TestCase):
         os.environ["DRAMAMATRIX_ALLOW_NO_CHARACTERS"] = "1"
         # These tests exercise render mechanics, not manual review; disable review gate.
         os.environ["DRAMAMATRIX_REVIEW_MODE"] = "0"
+        # R2：这些用例验证合成/切片机制而非整集验收，关闭整集验收门禁。
+        os.environ["DRAMAMATRIX_EPISODE_REVIEW"] = "0"
         media_integrity_patcher = patch(
             "src.agnes_video.media_integrity",
             return_value={

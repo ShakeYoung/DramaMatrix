@@ -9,6 +9,7 @@ from langchain_core.output_parsers import PydanticOutputParser
 from src.state import DramaState, EpisodeState, FeedbackLog, ShotStoryboard
 from src.characters import render_character_block
 from src.agnes_video import purge_shot_versions_except
+from src.prompt_files import load_prompt
 from src.continuity import normalize_continuity
 
 
@@ -73,6 +74,8 @@ STORYBOARD_SYSTEM_PROMPT = """你是一个资深的短剧分镜师和AI视频提
 4. Audio提示：提供明确的音效暗示（BGM情绪与环境音，例如“沉重的低音提琴，雨声”）。
 5. 每个分镜必须连续，总体构成一集的完整叙事，结尾停留在【悬念】处。
 6. 单集时长通常在 1-2 分钟，因此请输出大约 15 到 25 个分镜来覆盖这一集的丰满剧情。
+7. dialogue 为角色台词时，speaker 字段必须填写说话角色的名字（与角色一致性表中的名称一致），
+   用于配音音色与字幕归属；旁白或无声镜头 speaker 留空字符串。
 """
 
 STORYBOARD_RECOVERY_PROMPT = """【严重警告：恢复模式】
@@ -101,7 +104,8 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
         
         # 检查是否处于被退回重写的状态
         is_recovery = ep_state.status == "director_rejected"
-        sys_prompt = STORYBOARD_SYSTEM_PROMPT
+        # U5：基础/恢复 prompt 均可被 prompts/*.md 覆盖，内置默认等价回退。
+        sys_prompt = load_prompt("agent4_storyboard", STORYBOARD_SYSTEM_PROMPT)
         target_shots = int(os.getenv("DRAMAMATRIX_TARGET_SHOTS_PER_EPISODE", "0") or 0)
         if _test_mode() and target_shots > 0:
             sys_prompt += (
@@ -110,8 +114,9 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
             )
         if is_recovery and ep_state.feedback_log:
             last_error = ep_state.feedback_log[-1].message
-            sys_prompt += "\n\n" + STORYBOARD_RECOVERY_PROMPT.format(
-                error_message=_escape_template_text(last_error)
+            sys_prompt += "\n\n" + (
+                load_prompt("agent4_storyboard_recovery", STORYBOARD_RECOVERY_PROMPT)
+                .replace("{error_message}", _escape_template_text(last_error))
             )
             print(f"!! 进入 Recovery 模式 (B计划), 处理反馈: {last_error}")
             # P0-A：分镜版本隔离——重写时递增版本号并清掉旧版本镜头目录，
@@ -197,6 +202,7 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
                     camera="特写镜头, 静态",
                     visual_prompt="男人嘴角微微抽动，眼神直视镜头，顶光照明，面部表情凝重。",
                     dialogue="你以为你赢定了？",
+                    speaker="男主",
                     duration="4s",
                     audio="沉重的低音提琴，雨声渐强"
                 )
@@ -263,4 +269,71 @@ def process_agent4_storyboard(state: DramaState) -> DramaState:
                 state["episodes"][ep_key] = ep_state
         state["system_status"] = "blocked_on_storyboard_generation"
 
+    # R3：分镜确认后的成本预估与额度门禁——在进入付费生成前回答"这一集
+    # 预计花多少钱"。价目表（DRAMAMATRIX_PRICE_VIDEO_CREATE）未配置时休眠。
+    _apply_cost_estimate_gate(state)
+
     return state
+
+
+def _apply_cost_estimate_gate(state: DramaState) -> None:
+    """按价目表对 storyboard_done 的集做金额预估并检查单集/项目预算。
+
+    超预算的集退回 storyboard_blocked（COST_ESTIMATE_EXCEEDED），预估事件
+    幂等落账（estimate:ep:v版本），供成本报表展示"进入生成前的预估口径"。
+    账本模块不可用时跳过（金额护栏退化关闭，次数护栏仍生效）。
+    """
+    try:
+        from src import cost_ledger
+    except Exception:  # noqa: BLE001 - 账本缺失不阻断分镜
+        return
+
+    price = cost_ledger.video_create_price()
+    if price <= 0:
+        return
+    project_id = state["project_id"]
+    ep_budget = cost_ledger.episode_budget()
+    project_budget = cost_ledger.project_budget()
+
+    estimates: dict[str, float] = {}
+    blocked_eps: list[tuple[str, str]] = []
+    for ep_key, ep_state in state["episodes"].items():
+        if ep_state.status != "storyboard_done":
+            continue
+        rendered = sum(1 for a in ep_state.video_assets if a.local_path)
+        unrendered = max(0, len(ep_state.storyboard_data) - rendered)
+        amount = cost_ledger.record_storyboard_estimate(
+            project_id, ep_key, int(ep_state.storyboard_version or 1), unrendered
+        )
+        if amount <= 0:
+            continue
+        estimates[ep_key] = amount
+        if ep_budget > 0 and amount > ep_budget + 1e-9:
+            blocked_eps.append((ep_key, f"单集预估 {amount:.2f} 超出 DRAMAMATRIX_EPISODE_BUDGET {ep_budget:.2f}"))
+    if not estimates:
+        return
+    if project_budget > 0:
+        planned_total = sum(estimates.values())
+        already_spent = cost_ledger.project_spent(project_id)
+        if already_spent + planned_total > project_budget + 1e-9:
+            for ep_key in estimates:
+                blocked_eps.append(
+                    (ep_key, f"项目预估总花费 {already_spent + planned_total:.2f} 超出 "
+                             f"DRAMAMATRIX_PROJECT_BUDGET {project_budget:.2f}")
+                )
+    for ep_key, reason in blocked_eps:
+        ep_state = state["episodes"][ep_key]
+        ep_state.status = "storyboard_blocked"
+        ep_state.feedback_log.append(
+            FeedbackLog(
+                from_agent="Agent_4_Storyboard",
+                to_agent="Operator",
+                reason_code="COST_ESTIMATE_EXCEEDED",
+                message=f"{ep_key} 成本预估门禁未通过：{reason}（货币 {cost_ledger.currency()}，"
+                        f"价目为估算口径，请按供应商账单对账）。",
+            )
+        )
+        state["episodes"][ep_key] = ep_state
+        print(f"❌ {ep_key} {reason}，已拦截（COST_ESTIMATE_EXCEEDED）。")
+    if blocked_eps:
+        state["system_status"] = "blocked_on_storyboard_generation"

@@ -134,9 +134,26 @@ def _asset_meta(name: str, base: GrowthMeta, total_seconds: float) -> tuple[str,
     )
 
 
+def _growth_targets(project_id: str, state: DramaState) -> list:
+    """待制作投流素材的集：edit_completed，或整集验收已 approve 的集（R2）。"""
+    targets = []
+    for key, ep in state["episodes"].items():
+        if ep.status == "edit_completed":
+            targets.append((key, ep))
+        elif ep.status == "awaiting_episode_review":
+            try:
+                from src.episode_review import episode_approved
+
+                if episode_approved(project_id, key):
+                    targets.append((key, ep))
+            except Exception:
+                pass
+    return targets
+
+
 def process_agent7_growth(state: DramaState) -> DramaState:
     print("--- [Agent 7: FFmpeg Growth Packaging] ---")
-    targets = [(key, ep) for key, ep in state["episodes"].items() if ep.status == "edit_completed"]
+    targets = _growth_targets(state["project_id"], state)
     if not targets:
         print("没有待制作投流素材的成片。")
         return state
@@ -179,18 +196,30 @@ def process_agent7_growth(state: DramaState) -> DramaState:
 
             ep_state.growth_assets = assets
             ep_state.growth_meta = base_meta
-            ep_state.status = "growth_ready"
             print(f"✅ {ep_key} 已导出 {len(assets)} 个情绪段投流切片及发布元数据。")
-            # E2：打包投放包（切片 + 封面 + 元数据），并记入成片交付证据。
+            # E2/R2：打包投放包（切片 + 封面 + 元数据 + 哈希清单），导出后
+            # 验证完整性——验证不通过绝不标记 growth_ready（"就绪"必须意味着
+            # 完整交付包已经存在），导出异常同样阻断而非只打告警。
+            from src.publish import export_publish_package, verify_publish_package
+
             try:
-                from src.publish import export_publish_package
                 pkg_dir = export_publish_package(state["project_id"], ep_key, ep_state)
-                if pkg_dir:
-                    record_deliverable(ep_state, kind="publish_package", path=pkg_dir.joinpath("publish_meta.json"),
-                                       source_shots=[s.shot_id for s in ep_state.storyboard_data])
-                    print(f"📦 {ep_key} 投放包已导出 -> {pkg_dir}")
-            except Exception as exc:
-                print(f"   ⚠️ 投放包导出失败（不阻断）：{exc}")
+            except Exception as exc:  # noqa: BLE001 - 导出任何异常都阻断就绪
+                raise AgnesVideoError(f"投放包导出失败：{exc}") from exc
+            if pkg_dir:
+                problems = verify_publish_package(pkg_dir, ep_state)
+                if problems:
+                    raise AgnesVideoError(
+                        "投放包完整性验证未通过：" + "；".join(problems)
+                    )
+                record_deliverable(ep_state, kind="publish_package", path=pkg_dir.joinpath("publish_meta.json"),
+                                   source_shots=[s.shot_id for s in ep_state.storyboard_data])
+                print(f"📦 {ep_key} 投放包已导出并通过完整性验证 -> {pkg_dir}")
+            else:
+                # 导出被关闭（DRAMAMATRIX_PUBLISH_EXPORT=0）时保留旧语义：
+                # 仅切片完成即就绪（无包可验）。
+                print(f"   {ep_key} 投放包导出已关闭，仅以切片就绪。")
+            ep_state.status = "growth_ready"
         except AgnesVideoError as exc:
             ep_state.status = "growth_failed"
             ep_state.feedback_log.append(

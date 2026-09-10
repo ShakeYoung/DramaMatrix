@@ -84,7 +84,12 @@ class RouteTests(unittest.TestCase):
         from src.graph import route_after_cycles
 
         s = {"task_cycle": 1, "episodes": {"ep_01": EpisodeState(status="growth_ready")}}
-        with patch.dict(os.environ, {"DRAMAMATRIX_MAX_CYCLES": "2"}, clear=False):
+        # R1：回环默认关闭，需显式开启后才按周期上限回 Agent1。
+        with patch.dict(
+            os.environ,
+            {"DRAMAMATRIX_MAX_CYCLES": "2", "DRAMAMATRIX_AUTO_NEXT_CYCLE": "1"},
+            clear=False,
+        ):
             self.assertEqual(route_after_cycles(s), "agent1_scout")
 
     def test_market_cycle_ends_at_limit(self):
@@ -93,7 +98,23 @@ class RouteTests(unittest.TestCase):
         # Agent8 increments task_cycle before routing; once it exceeds the max
         # (here 3 > 2) the loop stops.
         s = {"task_cycle": 3, "episodes": {"ep_01": EpisodeState(status="growth_ready")}}
-        with patch.dict(os.environ, {"DRAMAMATRIX_MAX_CYCLES": "2"}, clear=False):
+        with patch.dict(
+            os.environ,
+            {"DRAMAMATRIX_MAX_CYCLES": "2", "DRAMAMATRIX_AUTO_NEXT_CYCLE": "1"},
+            clear=False,
+        ):
+            self.assertEqual(route_after_cycles(s), END)
+
+    def test_market_cycle_disabled_by_default(self):
+        from src.graph import route_after_cycles
+
+        # R1：不开启 AUTO_NEXT_CYCLE 时即使集全部完成也不回环。
+        # 用剔除该变量的环境副本验证"未配置即关闭"的默认行为，
+        # 不受其他用例直接改写 os.environ 的泄漏影响。
+        s = {"task_cycle": 1, "episodes": {"ep_01": EpisodeState(status="growth_ready")}}
+        env = {k: v for k, v in os.environ.items() if k != "DRAMAMATRIX_AUTO_NEXT_CYCLE"}
+        env["DRAMAMATRIX_MAX_CYCLES"] = "2"
+        with patch.dict(os.environ, env, clear=True):
             self.assertEqual(route_after_cycles(s), END)
 
     def test_terminal_render_failed_not_routed_to_agent5_on_start(self):
@@ -197,7 +218,11 @@ class Agent1ScoutTests(unittest.TestCase):
             "characters": [],
             "system_status": "starting",
         }
-        with patch("src.agents.agent1_scout.db_get_unprocessed_novel", return_value=None), patch(
+        # R1：production 默认下 agent1 无书源会阻塞；本用例验证选书后的
+        # 状态记录，走 demo 模式的 mock 爬虫路径。
+        with patch.dict(os.environ, {"DRAMAMATRIX_RUN_MODE": "demo"}, clear=False), patch(
+            "src.agents.agent1_scout.db_get_unprocessed_novel", return_value=None
+        ), patch(
             "src.agents.agent1_scout.db_insert_novel", return_value=True
         ), patch("src.agents.agent1_scout.db_mark_novel_processed"), patch("time.sleep"):
             process_agent1_scout(state)
@@ -243,7 +268,9 @@ class TTSTests(unittest.TestCase):
 
         ep = make_episode()
         with patch.dict(os.environ, {"DRAMAMATRIX_TTS_URL": "", "DRAMAMATRIX_TTS_ENABLED": "1"}, clear=False):
-            self.assertIsNone(_apply_voiceover(ep, Path(tempfile.mkdtemp())))
+            audio, result = _apply_voiceover(ep, Path(tempfile.mkdtemp()))
+        self.assertIsNone(audio)
+        self.assertIsNone(result)
 
 
 class SubtitleTests(unittest.TestCase):
@@ -369,11 +396,13 @@ class SubtitleDistinctOutputTests(unittest.TestCase):
 class ScoutAttemptResetTests(unittest.TestCase):
     def test_agent8_resets_scout_attempts_on_new_cycle(self):
         # Regression (F9): a new market cycle must reset the换书 attempt budget.
+        # R1：周期完成需要真实数据回流——demo 模式 + 临时库写模拟行后才会
+        # 重置换书额度并 +1 周期。
+        import src.db as db_module
         from src.agents.agent8_analytics import process_agent8_analytics
-        from unittest.mock import patch as _patch
 
         state = {
-            "project_id": "p",
+            "project_id": "p_reset",
             "meta_info": {"genre_tags": ["女频"]},
             "market_feedback": None,
             "source_material": {},
@@ -384,12 +413,22 @@ class ScoutAttemptResetTests(unittest.TestCase):
             "characters": [],
             "system_status": "x",
         }
-        with _patch(
-            "src.agents.agent8_analytics.sqlite3.connect", side_effect=RuntimeError("no db")
-        ):
-            process_agent8_analytics(state)
+        with tempfile.TemporaryDirectory() as directory:
+            original_path = db_module.DB_PATH
+            db_module.DB_PATH = os.path.join(directory, "reset.db")
+            try:
+                db_module.init_db()
+                with patch.dict(
+                    os.environ,
+                    {"DRAMAMATRIX_RUN_MODE": "demo", "DRAMAMATRIX_ANALYTICS_IMPORT": ""},
+                    clear=False,
+                ):
+                    process_agent8_analytics(state)
+            finally:
+                db_module.DB_PATH = original_path
         self.assertEqual(state["task_cycle"], 2)
         self.assertEqual(state["scout_attempts"], 0)
+        self.assertEqual(state["episodes"]["ep_01"].status, "analytics_done")
 
 
 class DurableBudgetTests(unittest.TestCase):

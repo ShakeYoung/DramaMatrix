@@ -178,25 +178,85 @@ class TTSProviderTests(unittest.TestCase):
 
 
 class TTSAlignmentTests(unittest.TestCase):
-    """H1: each dialogue line is timed to its shot; no -shortest truncation."""
+    """H1/R2: dialogue lines are placed on a no-truncation timetable."""
 
-    def test_build_voiceover_pads_silence_per_shot(self):
+    def _fake_clip(self, dest):
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        dest.write_bytes(b"clip")
+        return dest
+
+    def test_build_voiceover_timetable_with_real_durations(self):
         from src.tts import build_voiceover
-        # 3 shots: line1(4s), empty(4s), line3(4s). Each segment must be fit to
-        # its shot duration, not concatenated raw.
-        segs = [("第一句", 4.0), ("", 4.0), ("第三句", 4.0)]
+        # 3 shots: line1(4s), empty(4s), line3(4s)。注入实测时长：line1=3s（窗口内），
+        # line3=3s（窗口内）。时间表：line1 [0,3]，line3 [8,11]；句间 5s 静音、
+        # 尾部 1s 静音补齐到视频总长 12s。
+        segs = [("第一句", 4.0, "女主"), ("", 4.0, None), ("第三句", 4.0, "男主")]
         with patch.dict(os.environ, {"DRAMAMATRIX_TTS_PROVIDER": "edge",
                                      "DRAMAMATRIX_TTS_ENABLED": "1"}, clear=False), \
-             patch("src.tts.synthesize_line", side_effect=lambda text, dest, role=None: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"mp3"), dest)[2]), \
-             patch("src.tts._fit_clip_to_duration", side_effect=lambda clip, dur, dest: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"fit"), dest)[2]) as fit, \
-             patch("src.tts._make_silent_track", side_effect=lambda dur, dest: (dest.parent.mkdir(parents=True, exist_ok=True), dest.write_bytes(b"sil"), dest)[2]) as silent, \
+             patch("src.tts.synthesize_line", side_effect=lambda text, dest, role=None: self._fake_clip(dest)), \
+             patch("src.tts._prepare_clip", side_effect=lambda clip, ratio, dest: self._fake_clip(dest)) as prep, \
+             patch("src.tts._make_silent_track", side_effect=lambda dur, dest: self._fake_clip(dest)) as silent, \
              patch("src.tts._concat_audio", return_value=True):
-            result = build_voiceover(segs, Path(tempfile.mkdtemp()) / "audio")
+            result = build_voiceover(
+                segs, Path(tempfile.mkdtemp()) / "audio", probe_duration=lambda p: 3.0
+            )
         self.assertTrue(result.voiceover)
-        self.assertEqual(result.segments_built, 2)  # 2 non-empty lines
-        # _fit_clip called for the 2 dialogue shots; _make_silent_track for the empty one.
-        self.assertEqual(fit.call_count, 2)
-        self.assertEqual(silent.call_count, 1)
+        self.assertEqual(result.segments_built, 2)
+        lines = {l.index: l for l in result.lines}
+        self.assertEqual(lines[0].start, 0.0)
+        self.assertEqual(lines[0].end, 3.0)
+        self.assertEqual(lines[2].start, 8.0)  # 空镜后从本镜头起点开始
+        self.assertEqual(lines[2].end, 11.0)
+        self.assertFalse(lines[0].overflow)
+        # 句间静音(3→8) + 尾部静音(11→12)
+        self.assertEqual(silent.call_count, 2)
+        self.assertEqual(prep.call_count, 2)
+        # 角色音色：synthesize_line 收到说话人
+        self.assertEqual(result.lines[0].role, "女主")
+
+    def test_long_line_speed_capped_and_overflow_recorded(self):
+        from src.tts import build_voiceover
+        # 第一句语音 10s、镜头窗口 4s：变速上限 1.35 → 有效 ~7.41s 仍溢出窗口，
+        # 保留完整语音（不截断）并标记 overflow；第二句 3s 被顺延到第一句之后。
+        segs = [("很长的一句台词", 4.0), ("第二句", 4.0)]
+        probe = unittest.mock.Mock(side_effect=[10.0, 3.0])
+        with patch.dict(os.environ, {"DRAMAMATRIX_TTS_PROVIDER": "edge",
+                                     "DRAMAMATRIX_TTS_ENABLED": "1",
+                                     "DRAMAMATRIX_TTS_MAX_SPEED": "1.35"}, clear=False), \
+             patch("src.tts.synthesize_line", side_effect=lambda text, dest, role=None: self._fake_clip(dest)), \
+             patch("src.tts._prepare_clip", side_effect=lambda clip, ratio, dest: self._fake_clip(dest)) as prep, \
+             patch("src.tts._make_silent_track", side_effect=lambda dur, dest: self._fake_clip(dest)), \
+             patch("src.tts._concat_audio", return_value=True):
+            result = build_voiceover(
+                segs, Path(tempfile.mkdtemp()) / "audio", probe_duration=probe
+            )
+        lines = {l.index: l for l in result.lines}
+        self.assertAlmostEqual(lines[0].speed_ratio, 1.35, places=3)
+        self.assertAlmostEqual(lines[0].end, 10.0 / 1.35, places=3)
+        self.assertTrue(lines[0].overflow, "变速到上限仍放不下应标记溢出")
+        # 第二句窗口内原速，但被顺延到第一句之后（而非其镜头起点 4s）
+        self.assertAlmostEqual(lines[1].speed_ratio, 1.0, places=3)
+        self.assertAlmostEqual(lines[1].start, lines[0].end, places=3)
+        self.assertEqual(prep.call_count, 2)
+        self.assertAlmostEqual(prep.call_args_list[0][0][1], 1.35, places=3)  # 首句变速
+        self.assertAlmostEqual(prep.call_args_list[1][0][1], 1.0, places=3)   # 次句原速
+
+    def test_unmeasured_line_degrades_to_slot_fit_with_flag(self):
+        from src.tts import build_voiceover
+        segs = [("无法测量时长的一句", 4.0)]
+        with patch.dict(os.environ, {"DRAMAMATRIX_TTS_PROVIDER": "edge",
+                                     "DRAMAMATRIX_TTS_ENABLED": "1"}, clear=False), \
+             patch("src.tts.synthesize_line", side_effect=lambda text, dest, role=None: self._fake_clip(dest)), \
+             patch("src.tts._fit_clip_to_duration", side_effect=lambda clip, dur, dest: self._fake_clip(dest)) as fit, \
+             patch("src.tts._concat_audio", return_value=True):
+            result = build_voiceover(
+                segs, Path(tempfile.mkdtemp()) / "audio", probe_duration=lambda p: None
+            )
+        line = result.lines[0]
+        self.assertTrue(line.synthesized)
+        self.assertTrue(line.unmeasured, "无法实测时长必须显式标记，供整集验收复核")
+        self.assertEqual(line.end, 4.0)
+        fit.assert_called_once()
 
     def test_mix_audio_has_no_shortest(self):
         import inspect

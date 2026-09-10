@@ -20,39 +20,52 @@ from urllib.parse import urlencode, urlparse, urlunparse
 
 import requests
 
+# U1：Agnes 异常族继承 provider 中立层级（provider_errors），Agent5 只捕获
+# 中立异常即可在更换 DRAMAMATRIX_VIDEO_PROVIDER 时保持失败语义不变。
+from src.provider_errors import (
+    ProviderConfigurationError,
+    ProviderConnectionError,
+    ProviderContentPolicyViolation,
+    ProviderError,
+    ProviderGatewayUncertain,
+    ProviderQueueFull,
+    ProviderSubmissionUncertain,
+    ProviderTaskFailed,
+)
 
-class AgnesVideoError(RuntimeError):
+
+class AgnesVideoError(ProviderError):
     """An Agnes API, download, or local-media error."""
 
 
-class AgnesConfigurationError(AgnesVideoError):
+class AgnesConfigurationError(AgnesVideoError, ProviderConfigurationError):
     """The local Agnes configuration is incomplete or invalid."""
 
 
-class AgnesTaskFailed(AgnesVideoError):
+class AgnesTaskFailed(AgnesVideoError, ProviderTaskFailed):
     """The remote video task reached the failed terminal state."""
 
 
-class AgnesContentPolicyViolation(AgnesVideoError):
+class AgnesContentPolicyViolation(AgnesVideoError, ProviderContentPolicyViolation):
     """Agnes rejected the prompt or existing task for content policy reasons."""
 
 
-class AgnesConnectionError(AgnesVideoError):
+class AgnesConnectionError(AgnesVideoError, ProviderConnectionError):
     """A network error occurred during an idempotent Agnes operation."""
 
 
-class AgnesSubmissionUncertain(AgnesVideoError):
+class AgnesSubmissionUncertain(AgnesVideoError, ProviderSubmissionUncertain):
     """A create request timed out after it may have reached Agnes."""
 
 
-class AgnesQueueFull(AgnesVideoError):
+class AgnesQueueFull(AgnesVideoError, ProviderQueueFull):
     """Agnes returned an explicit capacity/rate-limit refusal (queue_full / 429).
 
     Safe to retry later: no task was created, so no billing. Distinct from
     AgnesSubmissionUncertain (network interruption, may have been received)."""
 
 
-class AgnesGatewayUncertain(AgnesVideoError):
+class AgnesGatewayUncertain(AgnesVideoError, ProviderGatewayUncertain):
     """A 5xx gateway error where task creation status is UNKNOWN (R1).
 
     500/502/504 may occur AFTER the task was created (gateway returned failure).
@@ -116,8 +129,10 @@ class AgnesVideoSettings:
     def validate(self) -> None:
         if not self.api_key:
             raise AgnesConfigurationError("缺少 AGNES_API_KEY；请在 .env 中配置，切勿写入源码。")
-        if self.model != "agnes-video-v2.0":
-            raise AgnesConfigurationError("AGNES_VIDEO_MODEL 必须为 agnes-video-v2.0。")
+        # U1：不再硬锁 agnes-video-v2.0——供应商经 DRAMAMATRIX_VIDEO_PROVIDER 路由后，
+        # Agnes 侧也应允许使用 newer 模型名，只要求非空。
+        if not self.model.strip():
+            raise AgnesConfigurationError("AGNES_VIDEO_MODEL 不能为空。")
         if not self.base_url.startswith(("https://", "http://")):
             raise AgnesConfigurationError("AGNES_API_BASE_URL 必须是完整的 http(s) URL。")
         if not (1 <= self.frame_rate <= 60):
@@ -748,13 +763,17 @@ def has_audio_stream(path: Path) -> bool:
 
 
 def has_dialogue_stream(path: Path) -> Optional[bool]:
-    """Whether the media has a dialogue/speech audio track (E3).
+    """Whether the media has a dialogue/speech audio track (E3 / R2 tri-state).
 
     Distinct from has_audio_stream (any audio incl. BGM/env): this looks for a
-    speech-like audio stream. Heuristic: ffprobe codec is a voice/speech codec
-    (e.g. mp4a with speech profile, opus, named speech) OR stream metadata /
-    tags suggest speech/narration. Returns None when ffprobe is missing so the
-    caller can fall back to "apply TTS" (safe) instead of assuming no speech.
+    speech-like audio stream. Returns True only on explicit speech signals
+    (voice/speech codec profile, or stream title/tags naming speech/narration).
+    Returns False when there is no audio stream at all. Returns None when
+    UNABLE to determine (ffprobe missing, probe failure, or the old
+    "exactly one audio track" case — a lone track is just as likely to be
+    BGM/ambient as speech, so R2 no longer treats it as dialogue); the caller
+    then falls back to applying independent TTS (safe: never skip voicing on
+    an unconfirmed track).
     """
     ffprobe = shutil.which("ffprobe")
     if not ffprobe or not path.is_file():
@@ -777,17 +796,14 @@ def has_dialogue_stream(path: Path) -> Optional[bool]:
         profile = (s.get("profile") or "").lower()
         tags = s.get("tags") or {}
         title = (tags.get("title") or "").lower()
-        lang = (tags.get("language") or "").lower()
         # Heuristic: voice-focused codecs / speech titles / mono dialog markers.
         if codec in {"opus", "mp3", "aac"} and profile in {"speech", "voice"}:
             return True
         if any(kw in title for kw in ("语音", "对白", "voice", "speech", "narration", "对话")):
             return True
-        # Default: a single audio track is usually dialogue in a short drama;
-        # a second music/SFX track we cannot reliably tell apart -> assume speech
-        # only when exactly one audio stream (mono dialog) is present.
-    # Conservative: treat a lone audio stream as dialogue (short-drama norm).
-    return len(streams) == 1
+    # R2：单音轨不再推定为对白——纯 BGM/环境音同样是单音轨，无法区分时
+    # 返回 None（不确定），由调用方应用独立 TTS 而非跳过配音。
+    return None
 
 
 def sha256_file(path: Path, chunk_size: int = 65536) -> Optional[str]:

@@ -45,15 +45,27 @@ def fake_cut(source, destination, start_seconds, duration_seconds):
 
 class EndToEndSmokeTests(unittest.TestCase):
     def test_full_pipeline_with_market_loop(self):
+        # R1：本用例改写的环境变量全部在结束时还原，避免泄漏到其他用例
+        # （如依赖 production 默认模式的 run_mode 测试）。
+        env_snapshot = dict(os.environ)
+        self.addCleanup(
+            lambda: (os.environ.clear(), os.environ.update(env_snapshot))
+        )
         os.environ["DRAMAMATRIX_MAX_CYCLES"] = "2"
         os.environ["DRAMAMATRIX_RESUME"] = "0"
         os.environ["DRAMAMATRIX_MAX_SCOUT_ATTEMPTS"] = "3"
+        # R1：无密钥/无书源的 mock 链路属演示行为，需显式 demo 模式；
+        # 市场回环默认关闭，本用例专门验证回环，显式开启。
+        os.environ["DRAMAMATRIX_RUN_MODE"] = "demo"
+        os.environ["DRAMAMATRIX_AUTO_NEXT_CYCLE"] = "1"
         # This smoke exercises the market loop, not character enforcement.
         os.environ["DRAMAMATRIX_ALLOW_NO_CHARACTERS"] = "1"
         # Allow Agent4 mock fallback so the text-model-less smoke can produce shots.
         os.environ["DRAMAMATRIX_ALLOW_MOCK_STORYBOARD"] = "1"
         # This smoke exercises the loop, not manual review; disable the review gate.
         os.environ["DRAMAMATRIX_REVIEW_MODE"] = "0"
+        # R2：冒烟验证回环而非整集验收，关闭整集验收门禁。
+        os.environ["DRAMAMATRIX_EPISODE_REVIEW"] = "0"
 
         tmp = tempfile.mkdtemp()
         os.environ["DRAMAMATRIX_OUTPUT_DIR"] = os.path.join(tmp, "out")
@@ -88,7 +100,7 @@ class EndToEndSmokeTests(unittest.TestCase):
         ), mock.patch("src.agents.agent7_growth.cut_video", side_effect=fake_cut), mock.patch(
             "src.agents.agent6_editor.mix_audio_into_video",
             side_effect=lambda v, a, d: (d.parent.mkdir(parents=True, exist_ok=True), d.write_bytes(b"x"), d)[2],
-        ), mock.patch("src.agents.agent6_editor._apply_voiceover", return_value=None), mock.patch(
+        ), mock.patch("src.agents.agent6_editor._apply_voiceover", return_value=(None, None)), mock.patch(
             "src.agents.agent6_editor._apply_subtitles", return_value=None
         ):
             nodes = []

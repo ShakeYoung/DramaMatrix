@@ -11,7 +11,7 @@ All heavy lifting is shelled out to ffmpeg and is mock-friendly for CI.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Optional
 
@@ -66,11 +66,32 @@ def tts_voice(role: str | None = None) -> str:
 
 
 @dataclass(frozen=True)
+class TTSLine:
+    """R2 对白时间表：单句对白在成片音轨上的真实排布。
+
+    start/end 为该句语音在音轨上的实际起止秒；speed_ratio 为变速倍率
+    （1.0=原速）；overflow=True 表示即使变速到上限仍超出所属镜头窗口
+    （语音保留完整不截断，后续句顺延）；unmeasured=True 表示无法探测
+    合成时长，退回旧的"按时长裁齐"行为（需人工复核）。
+    """
+    index: int
+    role: Optional[str]
+    text: str
+    synthesized: bool
+    start: float = 0.0
+    end: float = 0.0
+    speed_ratio: float = 1.0
+    overflow: bool = False
+    unmeasured: bool = False
+
+
+@dataclass(frozen=True)
 class TTSResult:
     """Outcome of a per-episode voiceover pass."""
     audio_path: Optional[str]  # final mixed audio path (None => silent)
     voiceover: bool  # whether real voiceover was produced
     segments_built: int  # number of dialogue clips that were synthesized
+    lines: list = field(default_factory=list)  # list[TTSLine] 逐句时间表（R2）
 
 
 def synthesize_line(text: str, destination: Path, role: str | None = None) -> Optional[Path]:
@@ -131,59 +152,178 @@ def _synthesize_openai(text: str, destination: Path, role: str | None = None) ->
     return destination if destination.is_file() and destination.stat().st_size > 0 else None
 
 
-def build_voiceover(
-    dialogue_segments: list[tuple[str, float]],
-    destination_dir: Path,
-) -> TTSResult:
-    """Build a voiceover track timed to each shot (G4b / H1).
+def _audio_duration(path: Path) -> Optional[float]:
+    """Probe an audio file's duration in seconds via ffprobe (R2)."""
+    import json as _json
+    import shutil as _shutil
+    import subprocess as _subprocess
+    ffprobe = _shutil.which("ffprobe")
+    if not ffprobe or not path.is_file():
+        return None
+    command = [
+        ffprobe, "-v", "error", "-show_entries", "format=duration",
+        "-of", "json", str(path),
+    ]
+    try:
+        probe = _subprocess.run(command, check=True, capture_output=True, text=True)
+        info = _json.loads(probe.stdout or "{}")
+        value = float((info.get("format") or {}).get("duration") or 0.0)
+        return value if value > 0 else None
+    except (ValueError, OSError, _subprocess.CalledProcessError, _json.JSONDecodeError):
+        return None
 
-    dialogue_segments: [(dialogue_text, shot_duration_seconds)...]
-    For each shot, synthesize the dialogue, then pad/trim that clip to the
-    shot's duration with silence so every line aligns to its own shot window.
-    The final track length equals the sum of all shot durations (== the video
-    length), so mix_audio_into_video never truncates the video. Lines without
-    dialogue become pure-silence segments of their shot duration.
+
+def _max_tts_speed() -> float:
+    """R2：对白变速上限（超过则保留完整语音并标记溢出，绝不截断）。"""
+    try:
+        return min(max(float(os.getenv("DRAMAMATRIX_TTS_MAX_SPEED", "1.35")), 1.0), 2.0)
+    except ValueError:
+        return 1.35
+
+
+def build_voiceover(
+    dialogue_segments: list[tuple],
+    destination_dir: Path,
+    probe_duration=None,
+) -> TTSResult:
+    """Build a voiceover track timed to each shot (G4b / H1 / R2).
+
+    dialogue_segments: [(dialogue_text, shot_duration_seconds[, role])...]
+    R2 禁止截断：先逐句合成并实测时长（ffprobe），再按时间表排布——
+    - 语句落在自己的镜头窗口内则原速放置；
+    - 超出窗口时按 natural/slot 变速压缩（上限 DRAMAMATRIX_TTS_MAX_SPEED，
+      默认 1.35）；到上限仍放不下则保留完整语音、标记 overflow、后续句顺延；
+    - 无对白的镜头生成等长静音；音轨总长不少于视频总长（尾部补静音）。
+    每句的起止时间/变速/溢出通过 TTSResult.lines 返回，供字幕对齐与整集验收。
     """
     if not tts_enabled():
         return TTSResult(audio_path=None, voiceover=False, segments_built=0)
     provider = tts_provider()
     if not provider:
         return TTSResult(audio_path=None, voiceover=False, segments_built=0)
+    if probe_duration is None:
+        probe_duration = _audio_duration
 
     destination_dir.mkdir(parents=True, exist_ok=True)
+    max_speed = _max_tts_speed()
+    lines: list[TTSLine] = []
+    placed: list[tuple[TTSLine, Path]] = []  # (line, prepared clip)
     segments_built = 0
-    timed_clips: list[Path] = []
+
+    # 镜头起点（时间表锚）
+    shot_starts: list[float] = []
+    cursor = 0.0
+    for seg in dialogue_segments:
+        shot_starts.append(cursor)
+        cursor += max(float(seg[1]), 0.5)
+    total_duration = cursor
+
     for idx, seg in enumerate(dialogue_segments):
-        # E3：支持可选第三元素作为角色音色 (text, duration[, role])
         if len(seg) >= 3:
             text, duration, role = seg[0], seg[1], seg[2]
         else:
             text, duration = seg[0], seg[1]
             role = None
-        seg_duration = max(float(duration), 0.5)
-        if text.strip():
-            raw_clip = destination_dir / f"line_{idx:03d}.mp3"
-            if synthesize_line(text, raw_clip, role=role):
-                timed = _fit_clip_to_duration(raw_clip, seg_duration, destination_dir / f"timed_{idx:03d}.m4a")
-                if timed:
-                    timed_clips.append(timed)
-                    segments_built += 1
-                    continue
-        # No dialogue OR synth failed → silence segment of the shot duration.
-        silent = _make_silent_track(seg_duration, destination_dir / f"silence_{idx:03d}.m4a")
-        if silent:
-            timed_clips.append(silent)
+        slot = max(float(duration), 0.5)
+        text = (text or "").strip()
+        if not text:
+            continue  # 无对白：不留静音占位（由最终拼装时的间隙静音覆盖）
+        raw_clip = destination_dir / f"line_{idx:03d}.mp3"
+        if not synthesize_line(text, raw_clip, role=role):
+            lines.append(TTSLine(index=idx, role=role, text=text, synthesized=False))
+            continue
+        segments_built += 1
+        natural = probe_duration(raw_clip)
+        if natural is None:
+            # 无法实测时长：退回旧的按时长裁齐（截断）行为并显式标记，
+            # 供整集验收人工复核（缺 ffprobe 环境）。
+            timed = _fit_clip_to_duration(raw_clip, slot, destination_dir / f"timed_{idx:03d}.m4a")
+            if not timed:
+                lines.append(TTSLine(index=idx, role=role, text=text, synthesized=False))
+                continue
+            prev_end = next((l.end for l in reversed(lines) if l.synthesized), 0.0)
+            start = max(shot_starts[idx], prev_end)
+            line = TTSLine(index=idx, role=role, text=text, synthesized=True,
+                           start=start, end=start + slot, unmeasured=True)
+            lines.append(line)
+            placed.append((line, timed))
+            print(f"   [TTS] 第 {idx} 句无法探测时长，退回裁齐（unmeasured，需人工复核）。")
+            continue
+        # 时间表：不早于本镜头起点，也不与上一句重叠。
+        prev_end = next((l.end for l in reversed(lines) if l.synthesized), 0.0)
+        start = max(shot_starts[idx], prev_end)
+        speed = 1.0
+        if natural > slot + 0.05:
+            speed = min(natural / slot, max_speed)
+        effective = natural / speed
+        overflow = (start + effective) > shot_starts[idx] + slot + 0.05
+        if overflow:
+            print(f"   [TTS] 第 {idx} 句语音 {natural:.2f}s 超出镜头窗口 {slot:.2f}s"
+                  f"（变速 x{speed:.2f} 后仍溢出，保留完整语音并顺延后续对白）。")
+        line = TTSLine(index=idx, role=role, text=text, synthesized=True,
+                       start=start, end=start + effective,
+                       speed_ratio=round(speed, 3), overflow=overflow)
+        lines.append(line)
+        prepared = _prepare_clip(raw_clip, speed, destination_dir / f"timed_{idx:03d}.m4a")
+        if not prepared:
+            lines[-1] = TTSLine(index=idx, role=role, text=text, synthesized=False)
+            segments_built -= 1
+            continue
+        placed.append((line, prepared))
 
-    if not timed_clips:
-        return TTSResult(audio_path=None, voiceover=False, segments_built=0)
+    if not placed:
+        return TTSResult(audio_path=None, voiceover=False, segments_built=0, lines=lines)
+
+    # 拼装：句间间隙与首尾补静音，总长不少于视频时长。
+    pieces: list[Path] = []
+    timeline_cursor = 0.0
+    for line, clip in placed:
+        gap = line.start - timeline_cursor
+        if gap > 0.01:
+            silent = _make_silent_track(gap, destination_dir / f"gap_{len(pieces):03d}.m4a")
+            if not silent:
+                return TTSResult(audio_path=None, voiceover=False, segments_built=0, lines=lines)
+            pieces.append(silent)
+        pieces.append(clip)
+        timeline_cursor = line.end
+    if total_duration > timeline_cursor + 0.01:
+        tail = _make_silent_track(total_duration - timeline_cursor, destination_dir / "tail.m4a")
+        if tail:
+            pieces.append(tail)
 
     voiceover_path = destination_dir / "voiceover.m4a"
-    if _concat_audio(timed_clips, voiceover_path):
-        # Clean up intermediate clips.
-        for clip in timed_clips:
+    if _concat_audio(pieces, voiceover_path):
+        for clip in pieces:
             clip.unlink(missing_ok=True)
-        return TTSResult(audio_path=str(voiceover_path), voiceover=True, segments_built=segments_built)
-    return TTSResult(audio_path=None, voiceover=False, segments_built=0)
+        return TTSResult(
+            audio_path=str(voiceover_path), voiceover=True,
+            segments_built=segments_built, lines=lines,
+        )
+    return TTSResult(audio_path=None, voiceover=False, segments_built=0, lines=lines)
+
+
+def _prepare_clip(clip: Path, speed_ratio: float, destination: Path) -> Optional[Path]:
+    """R2：把合成语音统一重编码为 aac；speed_ratio>1 时施加 atempo 变速。"""
+    if speed_ratio <= 1.0 + 1e-6:
+        filter_expr = None
+    else:
+        # atempo 单段有效范围 0.5–100，1.35 内无需链式拆分。
+        filter_expr = f"atempo={speed_ratio:.4f}"
+    try:
+        import subprocess
+        ffmpeg = _require_binary("ffmpeg")
+    except (AgnesVideoError, ImportError):
+        return None
+    destination.parent.mkdir(parents=True, exist_ok=True)
+    command = [ffmpeg, "-y", "-i", str(clip)]
+    if filter_expr:
+        command += ["-filter:a", filter_expr]
+    command += ["-c:a", "aac", "-b:a", "128k", str(destination)]
+    try:
+        subprocess.run(command, check=True, capture_output=True, text=True)
+    except subprocess.CalledProcessError:
+        return None
+    return destination if destination.is_file() and destination.stat().st_size > 0 else None
 
 
 def _fit_clip_to_duration(clip: Path, target_seconds: float, destination: Path) -> Optional[Path]:
