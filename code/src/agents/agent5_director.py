@@ -11,16 +11,25 @@ from pathlib import Path
 import requests.exceptions as requests_exceptions
 
 from src.cost_tracker import CostTracker
+from src.model_providers import (
+    AgnesProvider,
+    RenderProfile,
+    VideoProvider,
+    configured_provider_name,
+    get_video_provider,
+)
+from src.provider_errors import (
+    ProviderConfigurationError,
+    ProviderConnectionError,
+    ProviderContentPolicyViolation,
+    ProviderError,
+    ProviderGatewayUncertain,
+    ProviderQueueFull,
+    ProviderSubmissionUncertain,
+    ProviderTaskFailed,
+)
 from src.agnes_video import (
-    AgnesConfigurationError,
-    AgnesConnectionError,
-    AgnesContentPolicyViolation,
-    AgnesGatewayUncertain,
-    AgnesQueueFull,
-    AgnesSubmissionUncertain,
-    AgnesTaskFailed,
     AgnesVideoClient,
-    AgnesVideoError,
     AgnesVideoSettings,
     episode_output_dir,
     frames_for_duration,
@@ -152,12 +161,25 @@ def _checkpoint(state: DramaState, ep_key: str, ep_state: EpisodeState) -> None:
         print(f"⚠️ {ep_key} 的 Agnes 任务状态快照保存失败：{exc}")
 
 
+def _build_provider() -> VideoProvider:
+    """U1：生产路径统一经 VideoProvider 抽象（E5 的"建好未接线"修复）。
+
+    agnes 分支用本模块解析的 AgnesVideoClient / AgnesVideoSettings 构造
+    （保留既有测试的 patch 点与构造时校验）；配置为其它供应商时直接走工厂。
+    """
+    if configured_provider_name() in {"agnes", "ag", ""}:
+        settings = AgnesVideoSettings.from_environment()
+        client = AgnesVideoClient(settings)
+        return AgnesProvider(client=client, settings=settings)
+    return get_video_provider()
+
+
 def _render_episode(
     state: DramaState,
     ep_key: str,
     ep_state: EpisodeState,
-    client: AgnesVideoClient,
-    settings: AgnesVideoSettings,
+    provider: VideoProvider,
+    profile: RenderProfile,
     tracker: CostTracker,
 ) -> None:
     storyboard_revision_count = sum(
@@ -165,15 +187,15 @@ def _render_episode(
         for fb in ep_state.feedback_log
         if fb.reason_code == "AGNES_RENDER_FAILED" and fb.to_agent == "Agent_4_Storyboard"
     )
-    if storyboard_revision_count >= settings.max_revisions:
+    if storyboard_revision_count >= profile.max_revisions:
         ep_state.status = "render_failed"
-        print(f"❌ {ep_key} 已达到 {settings.max_revisions} 次分镜重写上限。")
+        print(f"❌ {ep_key} 已达到 {profile.max_revisions} 次分镜重写上限。")
         return
 
     all_shots = ep_state.storyboard_data
     shots = all_shots
-    if settings.max_shots_per_episode > 0:
-        shots = shots[:settings.max_shots_per_episode]
+    if profile.max_shots_per_episode > 0:
+        shots = shots[:profile.max_shots_per_episode]
     if not shots:
         ep_state.status = "render_failed"
         print(f"❌ {ep_key} 没有可提交给 Agnes 的分镜。")
@@ -197,6 +219,29 @@ def _render_episode(
     from src.tts import agnes_voice_enabled
     character_block = render_character_block(state.get("characters", []))
     conditional = conditional_generation_enabled()
+    # U2/W4：角色参考图——图像供应商开启时现场生成（幂等），否则复用历史产物。
+    # 条件生成（注入视频任务）与身份质检（QC 比对基准）各自独立消费该映射；
+    # 失败只降级为"无参考图"，不阻断渲染（参考图是增强而非门禁）。
+    character_references: dict[str, str] = {}
+    try:
+        from src.character_refs import (
+            character_reference_map,
+            ensure_character_reference_images,
+        )
+        from src.image_providers import get_image_provider
+
+        image_provider = get_image_provider()
+        if image_provider is not None:
+            character_references = ensure_character_reference_images(
+                state["project_id"], state.get("characters", []), image_provider
+            )
+        else:
+            character_references = character_reference_map(
+                state.get("characters", []), state["project_id"]
+            )
+    except Exception as exc:  # noqa: BLE001 - 参考图链路故障不阻断渲染
+        character_references = {}
+        print(f"   ⚠️ 角色参考图链路不可用（继续无参考图渲染）：{exc}")
     # R8：加载场景参考图映射（部署时预生成角色/场景参考图并注册）。
     scene_references: dict[str, str] = load_scene_references()
     # G1：跨场景共享的容量节流器——任一 queue_full 即降级，成功创建即恢复。
@@ -254,6 +299,47 @@ def _render_episode(
                     _checkpoint(state, ep_key, ep_state)
                     print(f"⚠️ {ep_key} 已达 Agnes 创建次数预算上限（{tracker.max_creates}），熔断新任务。")
                     return
+                # R3：金额口径的付费前额度检查——预算不足时在新请求发出前停止。
+                from src import cost_ledger
+
+                _video_price = cost_ledger.video_create_price()
+                if _video_price > 0:
+                    if not cost_ledger.episode_budget_allows(state["project_id"], ep_key, _video_price):
+                        ep_state.status = "render_pending"
+                        ep_state.feedback_log.append(
+                            FeedbackLog(
+                                from_agent="Agent_5_Agnes_Director",
+                                to_agent="Operator",
+                                reason_code="EPISODE_BUDGET",
+                                message=(
+                                    f"{ep_key} 单集金额预算不足：已花费 "
+                                    f"{cost_ledger.episode_spent(state['project_id'], ep_key):.2f}"
+                                    f"+ 本次 {_video_price:.2f} 超出 DRAMAMATRIX_EPISODE_BUDGET "
+                                    f"{cost_ledger.episode_budget():.2f}（货币 {cost_ledger.currency()}）。"
+                                ),
+                            )
+                        )
+                        _checkpoint(state, ep_key, ep_state)
+                        print(f"⚠️ {ep_key} 单集金额预算不足，新任务发出前熔断（EPISODE_BUDGET）。")
+                        return
+                    if not cost_ledger.project_budget_allows(state["project_id"], _video_price):
+                        ep_state.status = "render_pending"
+                        ep_state.feedback_log.append(
+                            FeedbackLog(
+                                from_agent="Agent_5_Agnes_Director",
+                                to_agent="Operator",
+                                reason_code="PROJECT_BUDGET",
+                                message=(
+                                    f"项目金额预算不足：已花费 "
+                                    f"{cost_ledger.project_spent(state['project_id']):.2f}"
+                                    f"+ 本次 {_video_price:.2f} 超出 DRAMAMATRIX_PROJECT_BUDGET "
+                                    f"{cost_ledger.project_budget():.2f}（货币 {cost_ledger.currency()}）。"
+                                ),
+                            )
+                        )
+                        _checkpoint(state, ep_key, ep_state)
+                        print(f"⚠️ 项目金额预算不足，新任务发出前熔断（PROJECT_BUDGET）。")
+                        return
                 # G1：跨场景节流——若已被 queue_full 降级，等待容量恢复再提交。
                 if in_flight > 1 and not throttle.acquire_create():
                     ep_state.status = "waiting_for_agnes_capacity"
@@ -269,30 +355,49 @@ def _render_episode(
                     seed=scene_seed(20260801, shot.scene_id, index) if conditional else 20260801 + index,
                 )
                 if conditional:
-                    ref = prepare_shot_reference(shot, scene_references, previous_tail_reference)
-                    if ref.get("image_url"):
-                        create_kwargs["image_url"] = ref["image_url"]
-                        ref_source = "上一镜尾帧" if previous_tail_reference else "场景参考"
-                        print(f"   [{ep_key}/{shot.shot_id}] 携带参考图（{ref_source}）。")
-                        # F2/P1-5：记录参考资产引用链——保存本地路径与 SHA-256 证据，
+                    ref = prepare_shot_reference(
+                        shot, scene_references, previous_tail_reference, character_references
+                    )
+                    image_value = ref.get("image_url")
+                    ref_kind = ref.get("source")
+                    if image_value:
+                        # 本地文件路径统一转 data URI 再提交（远端无法访问本地盘），
+                        # 场景/角色参考与尾帧同规则（U2）。
+                        if not str(image_value).startswith(("data:", "http://", "https://")):
+                            local_candidate = Path(str(image_value))
+                            data_uri = frame_to_data_uri(local_candidate) if local_candidate.is_file() else None
+                            if data_uri:
+                                image_value = data_uri
+                        create_kwargs["image_url"] = image_value
+                        source_label = {
+                            "tail": "上一镜尾帧",
+                            "scene": "场景参考",
+                            "character": "角色参考图",
+                        }.get(ref_kind, "参考")
+                        print(f"   [{ep_key}/{shot.shot_id}] 携带参考图（{source_label}）。")
+                        # F2/P1-5/U2：记录参考资产引用链——保存本地路径与 SHA-256 证据，
                         # 而非只依赖临时 data: URI；并把哈希回填到资产证据字段。
-                        # 场景参考若为本地文件路径（file:// 或相对/绝对路径），同样本地化哈希。
                         try:
                             from src.agnes_video import sha256_file
                             from src.db import db_insert_reference_asset
-                            ref_local = previous_tail_path if previous_tail_reference else None
-                            if ref_local is None and not previous_tail_reference:
-                                # 场景参考：若 image_url 是本地路径则计算哈希
-                                scene_url = ref.get("image_url") or ""
-                                if scene_url and not scene_url.startswith(("data:", "http://", "https://")):
-                                    scene_path = Path(scene_url)
-                                    if scene_path.is_file():
-                                        ref_local = scene_path
+                            ref_local: Path | None = None
+                            if ref_kind == "tail":
+                                ref_local = previous_tail_path
+                            else:
+                                raw_ref = ref.get("image_url") or ""
+                                if raw_ref and not str(raw_ref).startswith(("data:", "http://", "https://")):
+                                    candidate = Path(str(raw_ref))
+                                    if candidate.is_file():
+                                        ref_local = candidate
                             ref_sha = sha256_file(ref_local) if ref_local else None
                             db_insert_reference_asset(
                                 project_id=state["project_id"],
-                                asset_type="tail_frame" if previous_tail_reference else "scene",
-                                ref_id=shot.scene_id or "tail",
+                                asset_type={
+                                    "tail": "tail_frame",
+                                    "scene": "scene",
+                                    "character": "character",
+                                }.get(ref_kind, "scene"),
+                                ref_id=ref.get("ref_id") or shot.scene_id or "tail",
                                 local_path=str(ref_local) if ref_local else None,
                                 sha256=ref_sha,
                                 referenced_by_shot=shot.shot_id,
@@ -307,7 +412,7 @@ def _render_episode(
                 if agnes_voice_enabled() and (shot.dialogue or "").strip():
                     create_kwargs["narration"] = (shot.dialogue or "").strip()
                 create_started_at = time.time()  # F3：提交起始时刻（排队耗时）
-                created = client.create_video(**create_kwargs)
+                created = provider.create(**create_kwargs)
                 # G1：成功创建说明容量已恢复，清除降级标记并释放槽位。
                 if in_flight > 1:
                     throttle.report_success()
@@ -323,12 +428,21 @@ def _render_episode(
                     ep_key=ep_key,
                     shot_id=shot.shot_id,
                     task_id=task_id,
-                    frames=frames_for_duration(shot.duration, settings.frame_rate),
-                    width=settings.width,
-                    height=settings.height,
+                    frames=frames_for_duration(shot.duration, profile.frame_rate),
+                    width=profile.width,
+                    height=profile.height,
                     queue_wait_seconds=queue_wait_seconds,
-                    provider=settings.model,
+                    provider=profile.model,
                 )
+                # R3：金额账本——付费请求已提交，按价目表预留（幂等于 task_id；
+                # 进程死亡后 --resume 不会重复计费）。
+                try:
+                    cost_ledger.record_video_reservation(
+                        state["project_id"], ep_key, shot.shot_id, task_id,
+                        provider=profile.model,
+                    )
+                except Exception as exc:  # noqa: BLE001 - 记账失败不阻断生产
+                    print(f"⚠️ 视频费用预留入账失败（不阻断）：{exc}")
                 asset = GeneratedVideoAsset(
                     shot_id=shot.shot_id,
                     video_id=video_id,
@@ -338,7 +452,7 @@ def _render_episode(
                     # V1：记录实际生成条件与版本证据，便于复现与审计
                     seed=create_kwargs.get("seed"),
                     negative_prompt=NEGATIVE_PROMPT,
-                    model_version=settings.model,
+                    model_version=profile.model,
                     reference_image_url=create_kwargs.get("image_url"),
                     # F2：参考图哈希回填（尾帧本地哈希；场景参考时可能为 None）
                     reference_image_sha256=asset_reference_sha,
@@ -354,18 +468,18 @@ def _render_episode(
                 is_new_create = True  # P1-4：标记本次为新建任务（渲染耗时才有意义）
                 print(f"   [{ep_key}/{shot.shot_id}] 已创建 Agnes 任务并保存: {task_id}")
 
-            completed = client.wait_for_video(video_id, task_id)
+            completed = provider.wait(video_id, task_id)
             # F3：渲染耗时仅对"本次新建"的任务有意义（创建→完成）；
             # 恢复任务从本次恢复开始计时不代表真实端到端渲染时长，置 None。
             render_seconds = (time.time() - shot_create_started_at) if is_new_create else None
             remote_url = (completed.get("metadata") or {}).get("url")
             if not remote_url:
-                raise AgnesVideoError("Agnes 任务已完成但响应未包含 metadata.url。")
+                raise ProviderError("视频任务已完成但响应未包含 metadata.url。")
             asset.status = "downloading"
             asset.remote_url = str(remote_url)
             _checkpoint(state, ep_key, ep_state)
             download_started_at = time.time()
-            local_path = client.download_video(
+            local_path = provider.download(
                 str(remote_url),
                 shot_directory / f"{index:03d}_{safe_component(shot.shot_id)}.mp4",
             )
@@ -411,6 +525,12 @@ def _render_episode(
                     _checkpoint(state, ep_key, ep_state)
                     print(f"❌ {ep_key}/{shot.shot_id} 下载的视频无效（ffprobe 校验失败），已退回重写。")
                     return
+                # R3：资产通过完整性校验——该笔费用从预留升级为已确认
+                # （合格产出成本；下载失败/校验不过的保留 reserved）。
+                try:
+                    cost_ledger.confirm_video_cost(state["project_id"], task_id)
+                except Exception:
+                    pass
             except Exception as exc:
                 print(f"   ⚠️ 媒体完整性采集失败（不阻断）：{exc}")
             _checkpoint(state, ep_key, ep_state)
@@ -423,12 +543,23 @@ def _render_episode(
             if first_path.is_file():
                 current_first_frame = first_path
             # P2-A：逐镜质检（上一镜尾帧 vs 当前镜首帧）。不合格只重绘当前镜。
+            # W4：角色身份质检——该镜命中角色参考图时作为比对基准传入。
+            identity_reference: Path | None = None
+            if character_references and (shot.dialogue or shot.visual_prompt):
+                match_text = f"{shot.visual_prompt or ''}\n{shot.dialogue or ''}"
+                for ref_name in sorted(character_references, key=len, reverse=True):
+                    if ref_name and ref_name in match_text:
+                        candidate = Path(character_references[ref_name])
+                        if candidate.is_file():
+                            identity_reference = candidate
+                        break
             qc_result = get_checker().check(
                 prev_video=None,
                 prev_last_frame=previous_tail_path,
                 curr_video=Path(local_path),
                 curr_first_frame=current_first_frame,
                 shot=shot,
+                reference_frame=identity_reference,
             )
             # F1：质检结果必须在判定前落库——失败样本同样要沉淀，
             # 否则"哪些场景最容易跳变/重绘前后是否提升"无从分析。
@@ -457,7 +588,7 @@ def _render_episode(
                     ep_state,
                     shot.shot_id,
                     qc_result.issues,
-                    settings,
+                    profile,
                     shot_directory=shot_directory,
                     shot_index=index,
                 )
@@ -478,13 +609,13 @@ def _render_episode(
                     if conditional:
                         data_uri = frame_to_data_uri(frame_path)
                         previous_tail_reference = data_uri if data_uri else None
-        except (AgnesSubmissionUncertain, AgnesGatewayUncertain) as exc:
+        except (ProviderSubmissionUncertain, ProviderGatewayUncertain) as exc:
             # 提交结果未知 / 网关不确定（任务可能已创建）→ 熔断，需人工核对，不自动重试。
             ep_state.status = "submission_uncertain"
             _checkpoint(state, ep_key, ep_state)
             print(f"❌ {ep_key}/{shot.shot_id} 提交状态未知/网关不确定，已熔断后续创建：{exc}")
             return
-        except AgnesQueueFull as exc:
+        except ProviderQueueFull as exc:
             # P0-1/P0-2/R10：队列满/限流是可恢复的——只暂停当前集，记录 next_retry_at，
             # 等待后重试当前镜，不标记 render_failed，也不让其他集立即重入。
             # G1：通知跨场景节流器降级，让并发中的其他场景也暂停新提交。
@@ -501,7 +632,7 @@ def _render_episode(
             print(f"⏸️ {ep_key}/{shot.shot_id} Agnes 队列满，第 {ep_state.queue_retry_count} 次等待，"
                   f"约 {backoff}s 后（next_retry_at 已持久化）可重试当前镜：{exc}")
             return
-        except (AgnesConnectionError, requests_exceptions.ChunkedEncodingError) as exc:
+        except (ProviderConnectionError, requests_exceptions.ChunkedEncodingError) as exc:
             # P0-3：瞬时连接失败不应把剩余剧集批量判 render_failed。
             # 仅把当前正在处理的集标记为 waiting_for_connectivity，其余保持原状。
             ep_state.status = "waiting_for_connectivity"
@@ -510,27 +641,27 @@ def _render_episode(
             _checkpoint(state, ep_key, ep_state)
             print(f"⏸️ {ep_key} Agnes 连接瞬时失败，标记 waiting_for_connectivity，恢复后继续：{exc}")
             return
-        except AgnesContentPolicyViolation as exc:
+        except ProviderContentPolicyViolation as exc:
             _reject_episode(
                 ep_key,
                 ep_state,
-                f"镜头 {shot.shot_id} 的 Agnes 内容策略拒绝：{exc}",
+                f"镜头 {shot.shot_id} 的内容策略拒绝：{exc}",
             )
             _checkpoint(state, ep_key, ep_state)
             return
-        except AgnesTaskFailed as exc:
-            _reject_episode(ep_key, ep_state, f"镜头 {shot.shot_id} 的 Agnes 任务失败：{exc}")
+        except ProviderTaskFailed as exc:
+            _reject_episode(ep_key, ep_state, f"镜头 {shot.shot_id} 的视频任务失败：{exc}")
             _checkpoint(state, ep_key, ep_state)
             return
-        except AgnesVideoError as exc:
+        except ProviderError as exc:
             # If an ID was persisted, this is recoverable: later runs poll the
             # same remote task instead of submitting a charged duplicate task.
             ep_state.status = "render_pending" if asset and (asset.video_id or asset.task_id) else "render_failed"
             _checkpoint(state, ep_key, ep_state)
             if asset and (asset.video_id or asset.task_id):
-                print(f"❌ {ep_key} 的 Agnes 任务处理失败：{exc}；已保留任务，重跑将继续恢复。")
+                print(f"❌ {ep_key} 的视频任务处理失败：{exc}；已保留任务，重跑将继续恢复。")
             else:
-                print(f"❌ {ep_key} 的 Agnes 创建前失败：{exc}；未创建可恢复的任务。")
+                print(f"❌ {ep_key} 的创建前失败：{exc}；未创建可恢复的任务。")
             return
 
     completed_ids = {
@@ -689,20 +820,20 @@ def process_agent5_director(state: DramaState) -> DramaState:
         return state
 
     try:
-        settings = AgnesVideoSettings.from_environment()
-        client = AgnesVideoClient(settings)
-    except AgnesConfigurationError as exc:
+        provider = _build_provider()
+    except ProviderConfigurationError as exc:
         state["system_status"] = "blocked_on_agnes_configuration"
-        print(f"❌ Agnes 配置错误：{exc}")
+        print(f"❌ 视频供应商配置错误：{exc}")
         return state
+    profile = provider.render_profile()
 
     try:
-        client.preflight()
-    except AgnesConfigurationError as exc:
+        provider.preflight()
+    except ProviderConfigurationError as exc:
         state["system_status"] = "blocked_on_agnes_configuration"
-        print(f"❌ Agnes 配置错误：{exc}")
+        print(f"❌ 视频供应商配置错误：{exc}")
         return state
-    except AgnesConnectionError as exc:
+    except ProviderConnectionError as exc:
         # P0-3：连通性瞬时失败不得把尚未提交的剧集批量判 render_failed。
         # 仅把正在处理的集转为 waiting_for_connectivity，其余保持原状以便下次恢复。
         for ep_key, ep_state in targets:
@@ -719,7 +850,7 @@ def process_agent5_director(state: DramaState) -> DramaState:
 
     tracker = CostTracker.from_environment(state["project_id"])
     for ep_key, ep_state in targets:
-        _render_episode(state, ep_key, ep_state, client, settings, tracker)
+        _render_episode(state, ep_key, ep_state, provider, profile, tracker)
         state["episodes"][ep_key] = ep_state
         if ep_state.status == "director_rejected":
             break
